@@ -666,6 +666,19 @@ header h1 {
     font-size: 0.75rem;
 }
 
+.gantt-order-row {
+    cursor: move;
+}
+
+.gantt-order-row.dragging {
+    opacity: 0.6;
+}
+
+.gantt-order-row.drag-over {
+    outline: 2px dashed #667eea;
+    outline-offset: -2px;
+}
+
 /* 子容器 */
 .gantt-children-container {
     overflow: hidden;

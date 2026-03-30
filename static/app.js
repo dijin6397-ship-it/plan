@@ -5,6 +5,14 @@ let trainPlans = [];
 let currentScheduleData = null;
 let ganttChart = null;
 let currentViewLevel = 'sbop';
+let serverStateRevision = null;
+let stateDirty = false;
+let statePullInFlight = false;
+let statePushInFlight = false;
+let statePushTimer = null;
+let statePollTimer = null;
+let ganttDndBound = false;
+let draggedOrderInfo = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     initializeDateTimeInput();
@@ -12,7 +20,110 @@ document.addEventListener('DOMContentLoaded', function() {
     loadTeams();
     loadTrainPlans();
     setupEventListeners();
+    bindGanttOrderDragDrop();
+    startStateSync();
 });
+
+function isHttpMode() {
+    return location.protocol === 'http:' || location.protocol === 'https:';
+}
+
+function isEditingLocked() {
+    const modal = document.getElementById('modal');
+    return modal && modal.style.display === 'block';
+}
+
+function markStateDirty() {
+    stateDirty = true;
+    scheduleStatePush();
+}
+
+function scheduleStatePush() {
+    if (!isHttpMode()) return;
+    if (statePushTimer) clearTimeout(statePushTimer);
+    statePushTimer = setTimeout(() => {
+        pushStateToServer();
+    }, 600);
+}
+
+async function pullStateFromServer(options = {}) {
+    if (!isHttpMode()) return;
+    if (statePullInFlight) return;
+    if (isEditingLocked() && options.force !== true) return;
+    statePullInFlight = true;
+    try {
+        const res = await fetch('/api/state', { cache: 'no-store' });
+        if (!res.ok) return;
+        const state = await res.json();
+        const nextRevision = typeof state.revision === 'number' ? state.revision : null;
+        if (serverStateRevision !== null && nextRevision !== null && nextRevision === serverStateRevision) return;
+        if (stateDirty && options.force !== true) return;
+
+        if (state && typeof state.templates === 'object' && state.templates) {
+            templates = state.templates;
+            localStorage.setItem('schedulingTemplates', JSON.stringify(templates));
+            updateTemplateSelects();
+        }
+        if (state && Array.isArray(state.teams)) {
+            teamDictionary = state.teams;
+            localStorage.setItem('schedulingTeamsList', JSON.stringify(teamDictionary));
+            renderTeamList();
+        }
+        if (state && Array.isArray(state.trainPlans)) {
+            trainPlans = state.trainPlans;
+            localStorage.setItem('schedulingTrainPlans', JSON.stringify(trainPlans));
+            renderTrainPlanList();
+            updateTrainNumberFilter();
+            renderScheduleFromPlans();
+        }
+
+        serverStateRevision = nextRevision;
+        stateDirty = false;
+    } finally {
+        statePullInFlight = false;
+    }
+}
+
+async function pushStateToServer() {
+    if (!isHttpMode()) return;
+    if (!stateDirty) return;
+    if (statePushInFlight) return;
+    statePushInFlight = true;
+    try {
+        const payload = {
+            revision: serverStateRevision,
+            templates,
+            teams: teamDictionary,
+            trainPlans
+        };
+        const res = await fetch('/api/state', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res.status === 409) {
+            stateDirty = false;
+            await pullStateFromServer({ force: true });
+            alert('检测到其他用户已更新数据，本地已自动刷新。请重新执行你的保存/操作。');
+            return;
+        }
+        if (!res.ok) return;
+        const state = await res.json();
+        serverStateRevision = typeof state.revision === 'number' ? state.revision : serverStateRevision;
+        stateDirty = false;
+    } finally {
+        statePushInFlight = false;
+    }
+}
+
+function startStateSync() {
+    if (!isHttpMode()) return;
+    if (statePollTimer) return;
+    pullStateFromServer({ force: true });
+    statePollTimer = setInterval(() => {
+        pullStateFromServer();
+    }, 5000);
+}
 
 function loadTeams() {
     const savedTeams = localStorage.getItem('schedulingTeamsList');
@@ -36,6 +147,7 @@ function saveTrainPlans() {
     localStorage.setItem('schedulingTrainPlans', JSON.stringify(trainPlans));
     renderTrainPlanList();
     updateTrainNumberFilter();
+    markStateDirty();
 }
 
 function addOrUpdateTrainPlan(trainNumber, templateName, startTimeStr) {
@@ -44,8 +156,10 @@ function addOrUpdateTrainPlan(trainNumber, templateName, startTimeStr) {
     const start = (startTimeStr || '').trim();
     if (!number || !tpl || !start) return;
 
+    const existing = trainPlans.find(p => p && p.number === number);
+    const orderOverrides = existing && existing.orderOverrides ? existing.orderOverrides : {};
     trainPlans = trainPlans.filter(p => p && p.number !== number);
-    trainPlans.push({ number, templateName: tpl, startTime: start });
+    trainPlans.push({ number, templateName: tpl, startTime: start, orderOverrides });
     trainPlans.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
     trainPlans = trainPlans.slice(0, 50);
     saveTrainPlans();
@@ -134,7 +248,7 @@ function buildMultiTrainSchedule() {
 
         const startDate = new Date(plan.startTime);
         startDate.setHours(8, 0, 0, 0);
-        const schedule = calculateTaktSchedule(plan.number, template, startDate);
+        const schedule = calculateTaktSchedule(plan.number, template, startDate, plan.orderOverrides || {});
         if (!schedule || !schedule.trains || schedule.trains.length === 0) return;
 
         const train = schedule.trains[0];
@@ -194,6 +308,7 @@ function renderScheduleFromPlans() {
 function saveTeams() {
     localStorage.setItem('schedulingTeamsList', JSON.stringify(teamDictionary));
     renderTeamList();
+    markStateDirty();
 }
 
 function addTeam() {
@@ -330,6 +445,7 @@ function loadTemplates() {
 function saveTemplatesToLocal() {
     localStorage.setItem('schedulingTemplates', JSON.stringify(templates));
     updateTemplateSelects();
+    markStateDirty();
 }
 
 function updateTemplateSelects() {
@@ -570,7 +686,7 @@ function generateSchedule() {
     document.querySelectorAll('.tab-btn')[0].click();
 }
 
-function calculateTaktSchedule(trainNumber, template, trainStartDate) {
+function calculateTaktSchedule(trainNumber, template, trainStartDate, orderOverrides = {}) {
     const train = {
         number: trainNumber,
         phases: []
@@ -604,6 +720,21 @@ function calculateTaktSchedule(trainNumber, template, trainStartDate) {
                 );
             }
             const takt = sbopTemplate.takt || 3;
+            const overrideKey = `${phaseTemplate.id}:${sbopTemplate.id}`;
+            const overrideOrderIds = orderOverrides ? orderOverrides[overrideKey] : null;
+            if (Array.isArray(overrideOrderIds) && overrideOrderIds.length > 0) {
+                const overrideSet = new Set(overrideOrderIds);
+                const orderById = new Map(allOrders.map(o => [o.id, o]));
+                const reordered = [];
+                overrideOrderIds.forEach(id => {
+                    const found = orderById.get(id);
+                    if (found) reordered.push(found);
+                });
+                allOrders.forEach(o => {
+                    if (!overrideSet.has(o.id)) reordered.push(o);
+                });
+                allOrders = reordered;
+            }
 
             const durationDays = Math.ceil(allOrders.length / takt) || 1;
             
@@ -611,6 +742,7 @@ function calculateTaktSchedule(trainNumber, template, trainStartDate) {
                 id: sbopTemplate.id,
                 name: sbopTemplate.name,
                 team: sbopTemplate.team,
+                takt: takt,
                 start_time: new Date(sbopStartDate),
                 end_time: null,
                 orders: []
@@ -955,7 +1087,8 @@ function renderGanttTree(scheduleData) {
                                 };
                                 
                                 html += `
-                                    <div class="gantt-row gantt-level-4">
+                                    <div class="gantt-row gantt-level-4 gantt-order-row" draggable="true"
+                                         data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}" data-order-index="${orderIndex}">
                                         <div class="gantt-row-header">
                                             <div class="gantt-toggle" style="visibility: hidden;">+</div>
                                             <div class="gantt-row-info">
@@ -1013,6 +1146,100 @@ function resetGanttZoom() {
     ganttZoomLevel = 1;
     ganttScrollPosition = 0;
     renderScheduleFromPlans();
+}
+
+function setTrainOrderOverride(trainNumber, phaseId, sbopId, orderIds) {
+    const plan = trainPlans.find(p => p && p.number === trainNumber);
+    if (!plan) return;
+    if (!plan.orderOverrides || typeof plan.orderOverrides !== 'object') {
+        plan.orderOverrides = {};
+    }
+    const key = `${phaseId}:${sbopId}`;
+    plan.orderOverrides[key] = orderIds;
+    saveTrainPlans();
+    renderScheduleFromPlans();
+}
+
+function clearDragClasses(tree) {
+    const dragging = tree.querySelector('.gantt-order-row.dragging');
+    if (dragging) dragging.classList.remove('dragging');
+    tree.querySelectorAll('.gantt-order-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+
+function bindGanttOrderDragDrop() {
+    if (ganttDndBound) return;
+    const tree = document.getElementById('ganttTree');
+    if (!tree) return;
+    ganttDndBound = true;
+
+    tree.addEventListener('dragstart', (e) => {
+        const row = e.target.closest && e.target.closest('.gantt-order-row');
+        if (!row) return;
+        const trainIndex = parseInt(row.dataset.trainIndex, 10);
+        const phaseIndex = parseInt(row.dataset.phaseIndex, 10);
+        const sbopIndex = parseInt(row.dataset.sbopIndex, 10);
+        const orderIndex = parseInt(row.dataset.orderIndex, 10);
+        if ([trainIndex, phaseIndex, sbopIndex, orderIndex].some(n => Number.isNaN(n))) return;
+
+        draggedOrderInfo = { trainIndex, phaseIndex, sbopIndex, orderIndex };
+        row.classList.add('dragging');
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', `${trainIndex}:${phaseIndex}:${sbopIndex}:${orderIndex}`);
+        }
+    });
+
+    tree.addEventListener('dragover', (e) => {
+        if (!draggedOrderInfo) return;
+        const row = e.target.closest && e.target.closest('.gantt-order-row');
+        if (!row) return;
+        const trainIndex = parseInt(row.dataset.trainIndex, 10);
+        const phaseIndex = parseInt(row.dataset.phaseIndex, 10);
+        const sbopIndex = parseInt(row.dataset.sbopIndex, 10);
+        if (Number.isNaN(trainIndex) || Number.isNaN(phaseIndex) || Number.isNaN(sbopIndex)) return;
+        if (trainIndex !== draggedOrderInfo.trainIndex || phaseIndex !== draggedOrderInfo.phaseIndex || sbopIndex !== draggedOrderInfo.sbopIndex) return;
+        e.preventDefault();
+        clearDragClasses(tree);
+        row.classList.add('drag-over');
+    });
+
+    tree.addEventListener('drop', (e) => {
+        if (!draggedOrderInfo) return;
+        const row = e.target.closest && e.target.closest('.gantt-order-row');
+        if (!row) return;
+        const trainIndex = parseInt(row.dataset.trainIndex, 10);
+        const phaseIndex = parseInt(row.dataset.phaseIndex, 10);
+        const sbopIndex = parseInt(row.dataset.sbopIndex, 10);
+        const toOrderIndex = parseInt(row.dataset.orderIndex, 10);
+        if ([trainIndex, phaseIndex, sbopIndex, toOrderIndex].some(n => Number.isNaN(n))) return;
+        if (trainIndex !== draggedOrderInfo.trainIndex || phaseIndex !== draggedOrderInfo.phaseIndex || sbopIndex !== draggedOrderInfo.sbopIndex) return;
+        e.preventDefault();
+
+        const scheduleData = currentScheduleData;
+        if (!scheduleData || !scheduleData.trains || !scheduleData.trains[trainIndex]) return;
+        const train = scheduleData.trains[trainIndex];
+        const phase = train.phases && train.phases[phaseIndex];
+        const sbop = phase && phase.sbops && phase.sbops[sbopIndex];
+        if (!sbop || !Array.isArray(sbop.orders)) return;
+
+        const fromIndex = draggedOrderInfo.orderIndex;
+        if (fromIndex === toOrderIndex) return;
+
+        const orders = sbop.orders.slice();
+        const [moved] = orders.splice(fromIndex, 1);
+        if (!moved) return;
+        const insertIndex = toOrderIndex > fromIndex ? toOrderIndex - 1 : toOrderIndex;
+        orders.splice(insertIndex, 0, moved);
+        const orderIds = orders.map(o => o.id);
+        setTrainOrderOverride(train.number, phase.id, sbop.id, orderIds);
+        clearDragClasses(tree);
+        draggedOrderInfo = null;
+    });
+
+    tree.addEventListener('dragend', () => {
+        clearDragClasses(tree);
+        draggedOrderInfo = null;
+    });
 }
 
 function updateTeamFilter(scheduleData) {

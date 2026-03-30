@@ -2,6 +2,8 @@ from datetime import datetime
 from pathlib import Path
 import os
 import json
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from threading import Lock
 import urllib.request
 import urllib.error
@@ -16,7 +18,9 @@ STATIC_DIR = BASE_DIR / "static"
 DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "state.json"
 _state_lock = Lock()
+POSTGRES_URL = os.environ.get("POSTGRES_URL")
 KV_REST_API_URL = os.environ.get("KV_REST_API_URL")
+
 KV_REST_API_TOKEN = os.environ.get("KV_REST_API_TOKEN")
 KV_STATE_KEY = os.environ.get("STATE_KV_KEY", "plan_state")
 
@@ -60,6 +64,40 @@ def _default_state():
         "trainPlans": [],
     }
 
+def _use_postgres():
+    return bool(POSTGRES_URL)
+
+def _get_pg_connection():
+    return psycopg2.connect(POSTGRES_URL, cursor_factory=RealDictCursor)
+
+def _init_pg_db():
+    if not _use_postgres():
+        return
+    try:
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS app_state (
+                        id VARCHAR(50) PRIMARY KEY,
+                        revision INTEGER NOT NULL,
+                        updated_at VARCHAR(100) NOT NULL,
+                        data JSONB NOT NULL
+                    )
+                """)
+                cur.execute("SELECT id FROM app_state WHERE id = %s", (KV_STATE_KEY,))
+                if not cur.fetchone():
+                    default_state_data = _default_state()
+                    cur.execute("""
+                        INSERT INTO app_state (id, revision, updated_at, data)
+                        VALUES (%s, %s, %s, %s)
+                    """, (KV_STATE_KEY, default_state_data['revision'], default_state_data['updatedAt'], json.dumps(default_state_data)))
+            conn.commit()
+    except Exception as e:
+        print(f"Error initializing Postgres DB: {e}")
+
+# Initialize DB on startup
+_init_pg_db()
+
 def _use_kv():
     return bool(KV_REST_API_URL and KV_REST_API_TOKEN)
 
@@ -95,7 +133,22 @@ def _kv_set(key: str, value: str):
 
 
 def _load_state():
-    if _use_kv():
+    if _use_postgres():
+        try:
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT data, revision, updated_at FROM app_state WHERE id = %s", (KV_STATE_KEY,))
+                    row = cur.fetchone()
+                    if row:
+                        data = row['data']
+                        data['revision'] = row['revision']
+                        data['updatedAt'] = row['updated_at']
+                        return data
+                    return _default_state()
+        except Exception as e:
+            print(f"Error loading from Postgres: {e}")
+            return _default_state()
+    elif _use_kv():
         try:
             raw = _kv_get(KV_STATE_KEY)
             if not raw:
@@ -132,6 +185,21 @@ def _load_state():
 
 
 def _save_state(state: dict):
+    if _use_postgres():
+        try:
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE app_state
+                        SET revision = %s, updated_at = %s, data = %s
+                        WHERE id = %s
+                    """, (state['revision'], state['updatedAt'], json.dumps(state), KV_STATE_KEY))
+                conn.commit()
+            return
+        except Exception as e:
+            print(f"Error saving to Postgres: {e}")
+            raise
+
     if _use_kv():
         _kv_set(KV_STATE_KEY, json.dumps(state, ensure_ascii=False))
         return

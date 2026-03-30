@@ -33,9 +33,14 @@ function isEditingLocked() {
     return modal && modal.style.display === 'block';
 }
 
-function markStateDirty() {
+function markStateDirty(immediate = false) {
     stateDirty = true;
-    scheduleStatePush();
+    if (immediate) {
+        if (statePushTimer) clearTimeout(statePushTimer);
+        pushStateToServer();
+    } else {
+        scheduleStatePush();
+    }
 }
 
 function scheduleStatePush() {
@@ -308,7 +313,7 @@ function renderScheduleFromPlans() {
 function saveTeams() {
     localStorage.setItem('schedulingTeamsList', JSON.stringify(teamDictionary));
     renderTeamList();
-    markStateDirty();
+    markStateDirty(true);
 }
 
 function addTeam() {
@@ -445,7 +450,7 @@ function loadTemplates() {
 function saveTemplatesToLocal() {
     localStorage.setItem('schedulingTemplates', JSON.stringify(templates));
     updateTemplateSelects();
-    markStateDirty();
+    markStateDirty(true);
 }
 
 function updateTemplateSelects() {

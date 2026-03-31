@@ -13,8 +13,13 @@ let statePushTimer = null;
 let statePollTimer = null;
 let ganttDndBound = false;
 let draggedOrderInfo = null;
+let currentUser = null;
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    if (isHttpMode() && !location.pathname.endsWith('/login.html') && !location.pathname.endsWith('login.html')) {
+        const ok = await ensureAuthenticated();
+        if (!ok) return;
+    }
     initializeDateTimeInput();
     loadTemplates();
     loadTeams();
@@ -28,12 +33,78 @@ function isHttpMode() {
     return location.protocol === 'http:' || location.protocol === 'https:';
 }
 
+function canWriteState() {
+    if (!isHttpMode()) return true;
+    if (!currentUser) return false;
+    if (currentUser.role === 'admin') return true;
+    const perms = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    return perms.includes('state:write');
+}
+
+async function ensureAuthenticated() {
+    try {
+        const res = await fetch('/api/me', { cache: 'no-store' });
+        if (res.status === 401) {
+            location.href = '/login.html';
+            return false;
+        }
+        if (!res.ok) return true;
+        currentUser = await res.json();
+        updateUserBar();
+        applyPermissions();
+        return true;
+    } catch (e) {
+        return true;
+    }
+}
+
+function updateUserBar() {
+    const el = document.getElementById('userInfo');
+    const btn = document.getElementById('logoutBtn');
+    const adminLink = document.getElementById('adminLink');
+    if (el && currentUser && currentUser.username) {
+        el.textContent = `当前账号：${currentUser.username}`;
+    }
+    if (btn) {
+        btn.style.display = currentUser ? 'inline-flex' : 'none';
+    }
+    if (adminLink) {
+        adminLink.style.display = currentUser && currentUser.role === 'admin' ? 'inline-flex' : 'none';
+    }
+}
+
+function applyPermissions() {
+    const writable = canWriteState();
+    const ids = [
+        'saveTemplateBtn',
+        'deleteTemplateBtn',
+        'importTemplateBtn',
+        'addPhaseBtn',
+        'scheduleBtn',
+        'clearScheduleBtn'
+    ];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = !writable;
+        if (!writable) el.classList.add('disabled');
+        else el.classList.remove('disabled');
+    });
+    const newTeamName = document.getElementById('newTeamName');
+    if (newTeamName) newTeamName.disabled = !writable;
+}
+
 function isEditingLocked() {
     const modal = document.getElementById('modal');
     return modal && modal.style.display === 'block';
 }
 
 function markStateDirty(immediate = false) {
+    if (isHttpMode() && currentUser && !canWriteState()) {
+        alert('当前账号无编辑权限。');
+        pullStateFromServer({ force: true });
+        return;
+    }
     stateDirty = true;
     if (immediate) {
         if (statePushTimer) clearTimeout(statePushTimer);
@@ -58,6 +129,10 @@ async function pullStateFromServer(options = {}) {
     statePullInFlight = true;
     try {
         const res = await fetch('/api/state', { cache: 'no-store' });
+        if (res.status === 401) {
+            location.href = '/login.html';
+            return;
+        }
         if (!res.ok) return;
         const state = await res.json();
         const nextRevision = typeof state.revision === 'number' ? state.revision : null;
@@ -106,6 +181,16 @@ async function pushStateToServer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
+        if (res.status === 401) {
+            location.href = '/login.html';
+            return;
+        }
+        if (res.status === 403) {
+            stateDirty = false;
+            alert('当前账号无编辑权限。');
+            await pullStateFromServer({ force: true });
+            return;
+        }
         if (res.status === 409) {
             stateDirty = false;
             await pullStateFromServer({ force: true });
@@ -355,6 +440,15 @@ function initializeDateTimeInput() {
 }
 
 function setupEventListeners() {
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async function() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {}
+            location.href = '/login.html';
+        });
+    }
     document.getElementById('scheduleBtn').addEventListener('click', generateSchedule);
     const clearScheduleBtn = document.getElementById('clearScheduleBtn');
     if (clearScheduleBtn) {

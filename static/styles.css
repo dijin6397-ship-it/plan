@@ -30,6 +30,19 @@ header {
     gap: 15px;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.user-info {
+    font-size: 0.95rem;
+    opacity: 0.95;
+}
+
 .logo {
     width: 737px;
     height: 170px;
@@ -174,6 +187,15 @@ header h1 {
     font-size: 0.9rem;
 }
 
+.form-group select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 0.9rem;
+    background: white;
+}
+
 .form-group input:focus {
     outline: none;
     border-color: #667eea;
@@ -235,6 +257,69 @@ header h1 {
 .btn-danger {
     background: #dc3545;
     color: white;
+}
+
+.btn.disabled,
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.auth-page {
+    max-width: 520px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    overflow: hidden;
+}
+
+.auth-body {
+    padding: 24px;
+}
+
+.captcha-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.captcha-box {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 54px;
+    flex: 1;
+}
+
+.admin-page {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    padding: 20px;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th,
+.table td {
+    border-bottom: 1px solid #e9ecef;
+    padding: 10px;
+    text-align: left;
+    font-size: 0.9rem;
+}
+
+.table th {
+    background: #f8f9fa;
 }
 
 .btn-danger:hover {

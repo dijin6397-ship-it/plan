@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>账号及权限 - 生产计划自动排程系统</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <img src="logo.jpg" alt="Logo" class="logo">
+                <div class="header-text">
+                    <h1>账号及权限设置</h1>
+                    <p class="subtitle">仅管理员可访问</p>
+                </div>
+                <div class="header-actions">
+                    <a class="btn btn-sm btn-secondary" href="index.html">返回系统</a>
+                    <button id="logoutBtn" class="btn btn-sm">退出登录</button>
+                </div>
+            </div>
+        </header>
+
+        <div class="admin-page">
+            <h3 style="margin-bottom: 12px; color: #333;">新建账号</h3>
+            <div class="form-group">
+                <label for="newUsername">用户名</label>
+                <input id="newUsername" type="text" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="newPassword">密码</label>
+                <input id="newPassword" type="password" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+                <label for="newRole">角色</label>
+                <select id="newRole">
+                    <option value="user">普通用户</option>
+                    <option value="admin">管理员</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>权限</label>
+                <div style="display:flex; gap:12px; flex-wrap: wrap;">
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        <input type="checkbox" id="permStateWrite" checked>
+                        <span>编辑/保存数据</span>
+                    </label>
+                </div>
+            </div>
+            <button id="createUserBtn" class="btn btn-primary">创建账号</button>
+            <div id="adminMsg" style="margin-top: 10px; color: #dc3545; font-size: 0.9rem;"></div>
+
+            <h3 style="margin: 20px 0 12px; color: #333;">账号列表</h3>
+            <div style="overflow:auto;">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>用户名</th>
+                            <th>角色</th>
+                            <th>权限</th>
+                            <th>启用</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+</html>
+

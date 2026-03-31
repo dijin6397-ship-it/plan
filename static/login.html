@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 生产计划自动排程系统</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <img src="logo.jpg" alt="Logo" class="logo">
+                <div class="header-text">
+                    <h1>生产计划自动排程系统</h1>
+                </div>
+            </div>
+        </header>
+
+        <div class="auth-page">
+            <div class="auth-body">
+                <h3 style="margin-bottom: 16px; color: #333;">系统登录</h3>
+                <div class="form-group">
+                    <label for="username">用户名</label>
+                    <input id="username" type="text" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">密码</label>
+                    <input id="password" type="password" autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label for="captchaAnswer">验证码</label>
+                    <div class="captcha-row">
+                        <input id="captchaAnswer" type="text" inputmode="numeric" placeholder="请输入计算结果">
+                        <div id="captchaBox" class="captcha-box"></div>
+                        <button id="refreshCaptchaBtn" class="btn btn-sm btn-secondary" type="button">刷新</button>
+                    </div>
+                </div>
+                <button id="loginBtn" class="btn btn-primary">登录</button>
+                <div id="loginMsg" style="margin-top: 10px; color: #dc3545; font-size: 0.9rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="login.js"></script>
+</body>
+</html>
+

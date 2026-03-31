@@ -547,7 +547,7 @@ def _get_user(username: str):
         try:
             with _get_pg_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT * FROM app_users WHERE username = %s", (u,))
+                    cur.execute("SELECT * FROM app_users WHERE btrim(username) = %s", (u,))
                     row = cur.fetchone()
                     if not row:
                         return None
@@ -611,7 +611,7 @@ def _create_user(username: str, password: str, role: str, permissions, active: b
     if _use_auth_pg():
         with _get_pg_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT username FROM app_users WHERE username = %s", (u,))
+                cur.execute("SELECT username FROM app_users WHERE btrim(username) = %s", (u,))
                 if cur.fetchone():
                     raise ValueError("user exists")
                 cur.execute(
@@ -662,7 +662,9 @@ def _update_user(username: str, updates: dict):
             params.append(u)
             with _get_pg_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE username = %s", tuple(params))
+                    cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE btrim(username) = %s", tuple(params))
+                    if cur.rowcount == 0:
+                        raise ValueError("user not found")
                 conn.commit()
             return
         with _auth_lock:
@@ -701,7 +703,9 @@ def _update_user(username: str, updates: dict):
     if _use_auth_pg():
         with _get_pg_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE username = %s", tuple(params))
+                cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE btrim(username) = %s", tuple(params))
+                if cur.rowcount == 0:
+                    raise ValueError("user not found")
             conn.commit()
         return
     with _auth_lock:
@@ -730,7 +734,9 @@ def _delete_user(username: str):
     if _use_auth_pg():
         with _get_pg_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM app_users WHERE username = %s", (u,))
+                cur.execute("DELETE FROM app_users WHERE btrim(username) = %s", (u,))
+                if cur.rowcount == 0:
+                    raise ValueError("user not found")
             conn.commit()
         return
     with _auth_lock:

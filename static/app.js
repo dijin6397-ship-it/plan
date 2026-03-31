@@ -84,8 +84,12 @@ function updateUserBar() {
     const actionsContainer = document.querySelector('.header-actions') || (el ? el.parentElement : null);
     let btn = document.getElementById('logoutBtn');
     let adminLink = document.getElementById('adminLink');
-    if (el && currentUser && currentUser.username) {
-        el.textContent = `当前账号：${currentUser.username}`;
+    if (el) {
+        if (currentUser && currentUser.username) {
+            el.textContent = `当前账号：${currentUser.username}`;
+        } else {
+            el.textContent = '';
+        }
     }
     if (!btn && actionsContainer) {
         btn = document.createElement('button');
@@ -206,11 +210,11 @@ function applyPermissions() {
     }
 
     // For re-rendering components that check permissions inside their render functions
-    renderTeams();
-    renderDataTree();
-    renderTrainPlans();
-    if (ganttChart || document.getElementById('ganttTree')?.innerHTML) {
-        renderGantt();
+    if (typeof renderTeamList === 'function') renderTeamList();
+    if (typeof renderDataTree === 'function') renderDataTree();
+    if (typeof renderTrainPlanList === 'function') renderTrainPlanList();
+    if (typeof renderScheduleFromPlans === 'function' && (ganttChart || document.getElementById('ganttTree')?.innerHTML)) {
+        renderScheduleFromPlans();
     }
 }
 

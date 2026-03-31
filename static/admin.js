@@ -169,7 +169,14 @@ async function updateUser(username, payload) {
 async function deleteUser(username) {
     if (!confirm(`确定要删除账号 "${username}" 吗？`)) return;
     setAdminMsg('');
-    const res = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    let res = await fetch('/api/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+    });
+    if (res.status === 404 || res.status === 405) {
+        res = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    }
     if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setAdminMsg(data.error ? `删除失败：${formatAdminError(data.error)}` : '删除失败。');

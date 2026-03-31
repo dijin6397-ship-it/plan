@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import secrets
 import time
+import unicodedata
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from threading import Lock
@@ -305,6 +306,18 @@ def _auth_backend():
         return "kv"
     return "file"
 
+def _normalize_username_key(s: str) -> str:
+    t = unicodedata.normalize("NFKC", (s or ""))
+    out = []
+    for ch in t:
+        cat = unicodedata.category(ch) or ""
+        if cat.startswith("C"):
+            continue
+        if ch.isspace():
+            continue
+        out.append(ch)
+    return ("".join(out)).strip().casefold()
+
 def _load_users_store():
     backend = _auth_backend()
     if backend == "pg":
@@ -550,7 +563,15 @@ def _get_user(username: str):
                     cur.execute("SELECT * FROM app_users WHERE btrim(username) = %s", (u,))
                     row = cur.fetchone()
                     if not row:
-                        return None
+                        key = _normalize_username_key(u)
+                        cur.execute("SELECT * FROM app_users")
+                        rows = cur.fetchall() or []
+                        for r in rows:
+                            if _normalize_username_key(r.get("username") or "") == key:
+                                row = r
+                                break
+                        if not row:
+                            return None
                     if isinstance(row.get("permissions"), str):
                         try:
                             row["permissions"] = json.loads(row["permissions"])
@@ -664,7 +685,18 @@ def _update_user(username: str, updates: dict):
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE btrim(username) = %s", tuple(params))
                     if cur.rowcount == 0:
-                        raise ValueError("user not found")
+                        key = _normalize_username_key(u)
+                        cur.execute("SELECT username FROM app_users")
+                        rows = cur.fetchall() or []
+                        matches = [r.get("username") for r in rows if _normalize_username_key(r.get("username") or "") == key]
+                        matches = [m for m in matches if m]
+                        if len(matches) != 1:
+                            raise ValueError("user not found")
+                        params2 = list(params)
+                        params2[-1] = matches[0]
+                        cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE username = %s", tuple(params2))
+                        if cur.rowcount == 0:
+                            raise ValueError("user not found")
                 conn.commit()
             return
         with _auth_lock:
@@ -705,7 +737,18 @@ def _update_user(username: str, updates: dict):
             with conn.cursor() as cur:
                 cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE btrim(username) = %s", tuple(params))
                 if cur.rowcount == 0:
-                    raise ValueError("user not found")
+                    key = _normalize_username_key(u)
+                    cur.execute("SELECT username FROM app_users")
+                    rows = cur.fetchall() or []
+                    matches = [r.get("username") for r in rows if _normalize_username_key(r.get("username") or "") == key]
+                    matches = [m for m in matches if m]
+                    if len(matches) != 1:
+                        raise ValueError("user not found")
+                    params2 = list(params)
+                    params2[-1] = matches[0]
+                    cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE username = %s", tuple(params2))
+                    if cur.rowcount == 0:
+                        raise ValueError("user not found")
             conn.commit()
         return
     with _auth_lock:
@@ -736,13 +779,35 @@ def _delete_user(username: str):
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM app_users WHERE btrim(username) = %s", (u,))
                 if cur.rowcount == 0:
-                    raise ValueError("user not found")
+                    key = _normalize_username_key(u)
+                    cur.execute("SELECT username FROM app_users")
+                    rows = cur.fetchall() or []
+                    matches = [r.get("username") for r in rows if _normalize_username_key(r.get("username") or "") == key]
+                    matches = [m for m in matches if m]
+                    if len(matches) != 1:
+                        raise ValueError("user not found")
+                    cur.execute("DELETE FROM app_users WHERE username = %s", (matches[0],))
+                    if cur.rowcount == 0:
+                        raise ValueError("user not found")
             conn.commit()
         return
     with _auth_lock:
         store = _load_users_store()
         if u not in store:
-            raise ValueError("user not found")
+            key = _normalize_username_key(u)
+            matches = []
+            for k, v in (store or {}).items():
+                if _normalize_username_key(k) == key:
+                    matches.append(k)
+                    continue
+                if isinstance(v, dict) and _normalize_username_key(v.get("username") or "") == key:
+                    matches.append(k)
+            matches = list(dict.fromkeys([m for m in matches if m]))
+            if len(matches) != 1:
+                raise ValueError("user not found")
+            del store[matches[0]]
+            _save_users_store(store)
+            return
         del store[u]
         _save_users_store(store)
 
@@ -815,6 +880,50 @@ def api_users_create():
         return jsonify({"error": "auth_db_error"}), 503
     except Exception:
         return jsonify({"error": "create_failed"}), 500
+
+
+@app.post("/api/users/delete")
+@_require_admin
+def api_users_delete_by_body():
+    data = request.get_json(force=True) or {}
+    username = data.get("username") if isinstance(data, dict) else None
+    try:
+        _delete_user(username)
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError:
+        return jsonify({"error": "auth_storage_not_configured"}), 503
+    except psycopg2.Error:
+        return jsonify({"error": "auth_db_error"}), 503
+    except Exception:
+        return jsonify({"error": "delete_failed"}), 500
+
+
+@app.post("/api/users/delete_many")
+@_require_admin
+def api_users_delete_many():
+    data = request.get_json(force=True) or {}
+    usernames = data.get("usernames") if isinstance(data, dict) else None
+    if not isinstance(usernames, list) or not usernames:
+        return jsonify({"error": "usernames required"}), 400
+    deleted = []
+    failed = []
+    for u in usernames:
+        try:
+            _delete_user(u)
+            deleted.append(u)
+        except ValueError as e:
+            failed.append({"username": u, "error": str(e)})
+        except RuntimeError:
+            return jsonify({"error": "auth_storage_not_configured"}), 503
+        except psycopg2.Error:
+            return jsonify({"error": "auth_db_error"}), 503
+        except Exception:
+            failed.append({"username": u, "error": "delete_failed"})
+    if failed:
+        return jsonify({"ok": False, "deleted": deleted, "failed": failed}), 400
+    return jsonify({"ok": True, "deleted": deleted})
 
 
 @app.put("/api/users/<username>")

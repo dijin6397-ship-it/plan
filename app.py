@@ -167,6 +167,16 @@ def _has_permission(username: str, perm: str) -> bool:
     return isinstance(perms, list) and perm in perms
 
 def _json_user(user: dict) -> dict:
+    if (user.get("username") or "") == ADMIN_USERNAME:
+        admin_perms = ["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]
+        return {
+            "username": ADMIN_USERNAME,
+            "role": "admin",
+            "permissions": admin_perms,
+            "active": True,
+            "updatedAt": user.get("updated_at") or user.get("updatedAt"),
+            "createdAt": user.get("created_at") or user.get("createdAt"),
+        }
     return {
         "username": user.get("username"),
         "role": user.get("role") or "user",

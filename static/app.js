@@ -40,6 +40,7 @@ function hasPermission(perm) {
     if (!currentUser) return false;
     if (currentUser.role === 'admin') return true;
     const perms = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    if (perms.includes('admin')) return true;
     if (perms.includes('state:write')) return true; // legacy support
     return perms.includes(perm);
 }
@@ -89,7 +90,8 @@ function updateUserBar() {
         btn.style.display = currentUser ? 'inline-flex' : 'none';
     }
     if (adminLink) {
-        adminLink.style.display = currentUser && currentUser.role === 'admin' ? 'inline-flex' : 'none';
+        const perms = currentUser && Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+        adminLink.style.display = currentUser && (currentUser.role === 'admin' || perms.includes('admin')) ? 'inline-flex' : 'none';
     }
 }
 

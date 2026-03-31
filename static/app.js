@@ -91,7 +91,8 @@ function updateUserBar() {
     }
     if (adminLink) {
         const perms = currentUser && Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
-        adminLink.style.display = currentUser && (currentUser.role === 'admin' || perms.includes('admin')) ? 'inline-flex' : 'none';
+        const isAdmin = currentUser && (currentUser.username === 'admin' || currentUser.role === 'admin' || perms.includes('admin'));
+        adminLink.style.display = isAdmin ? 'inline-flex' : 'none';
     }
 }
 

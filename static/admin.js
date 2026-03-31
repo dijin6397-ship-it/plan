@@ -14,7 +14,8 @@ async function ensureAdmin() {
         return null;
     }
     const me = await res.json();
-    if (!me || me.role !== 'admin') {
+    const perms = me && Array.isArray(me.permissions) ? me.permissions : [];
+    if (!me || !(me.username === 'admin' || me.role === 'admin' || perms.includes('admin'))) {
         location.href = '/';
         return null;
     }

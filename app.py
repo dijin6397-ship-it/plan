@@ -151,19 +151,28 @@ def _require_admin(fn):
         username = _current_user()
         if not username:
             return jsonify({"error": "unauthorized"}), 401
-        user = _get_user(username)
-        if not user or user.get("role") != "admin":
+        u = (username or "").strip()
+        if u == ADMIN_USERNAME:
+            return fn(*args, **kwargs)
+        user = _get_user(u)
+        perms = (user or {}).get("permissions") or []
+        if not user or (user.get("role") != "admin" and not (isinstance(perms, list) and "admin" in perms)):
             return jsonify({"error": "forbidden"}), 403
         return fn(*args, **kwargs)
     return wrapper
 
 def _has_permission(username: str, perm: str) -> bool:
-    user = _get_user(username)
+    u = (username or "").strip()
+    if u == ADMIN_USERNAME:
+        return True
+    user = _get_user(u)
     if not user:
         return False
     if user.get("role") == "admin":
         return True
     perms = user.get("permissions") or []
+    if isinstance(perms, list) and "admin" in perms:
+        return True
     return isinstance(perms, list) and perm in perms
 
 def _json_user(user: dict) -> dict:

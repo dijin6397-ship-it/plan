@@ -197,9 +197,10 @@ def _init_auth_db():
             """)
             cur.execute("SELECT username FROM app_users WHERE username = %s", (ADMIN_USERNAME,))
             exists = cur.fetchone()
-            if ADMIN_PASSWORD:
-                now = datetime.utcnow().isoformat()
-                if not exists:
+            now = datetime.utcnow().isoformat()
+            admin_perms = ["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]
+            if not exists:
+                if ADMIN_PASSWORD:
                     cur.execute(
                         """
                         INSERT INTO app_users (username, password_hash, role, permissions, active, created_at, updated_at)
@@ -209,27 +210,25 @@ def _init_auth_db():
                             ADMIN_USERNAME,
                             generate_password_hash(ADMIN_PASSWORD),
                             "admin",
-                            json.dumps(["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]),
+                            json.dumps(admin_perms),
                             True,
                             now,
                             now,
                         ),
                     )
-                else:
+            else:
+                cur.execute(
+                    """
+                    UPDATE app_users
+                    SET role = %s, permissions = %s, active = %s, updated_at = %s
+                    WHERE username = %s
+                    """,
+                    ("admin", json.dumps(admin_perms), True, now, ADMIN_USERNAME),
+                )
+                if ADMIN_PASSWORD:
                     cur.execute(
-                        """
-                        UPDATE app_users
-                        SET password_hash = %s, role = %s, permissions = %s, active = %s, updated_at = %s
-                        WHERE username = %s
-                        """,
-                        (
-                            generate_password_hash(ADMIN_PASSWORD),
-                            "admin",
-                            json.dumps(["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]),
-                            True,
-                            now,
-                            ADMIN_USERNAME,
-                        ),
+                        "UPDATE app_users SET password_hash = %s, updated_at = %s WHERE username = %s",
+                        (generate_password_hash(ADMIN_PASSWORD), now, ADMIN_USERNAME),
                     )
         conn.commit()
 
@@ -505,6 +504,26 @@ def _update_user(username: str, updates: dict):
     if not u:
         raise ValueError("username required")
     now = datetime.utcnow().isoformat()
+    if u == ADMIN_USERNAME:
+        sets = []
+        params = []
+        if "password" in updates and updates["password"]:
+            sets.append("password_hash = %s")
+            params.append(generate_password_hash(updates["password"]))
+        sets.append("role = %s")
+        params.append("admin")
+        sets.append("permissions = %s")
+        params.append(json.dumps(["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]))
+        sets.append("active = %s")
+        params.append(True)
+        sets.append("updated_at = %s")
+        params.append(now)
+        params.append(u)
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE username = %s", tuple(params))
+            conn.commit()
+        return
     sets = []
     params = []
     if "password" in updates and updates["password"]:

@@ -27,12 +27,14 @@ function renderUsers(users) {
     tbody.innerHTML = (users || []).map(u => {
         const perms = Array.isArray(u.permissions) ? u.permissions.join(', ') : '';
         const activeChecked = u.active ? 'checked' : '';
-        const disableDelete = u.username === 'admin' ? 'disabled' : '';
+        const lockAdmin = u.username === 'admin';
+        const disableDelete = lockAdmin ? 'disabled' : '';
+        const disableAdminEdits = lockAdmin ? 'disabled' : '';
         return `
             <tr>
                 <td>${u.username || ''}</td>
                 <td>
-                    <select data-username="${u.username}" data-field="role">
+                    <select data-username="${u.username}" data-field="role" ${disableAdminEdits}>
                         <option value="user" ${u.role === 'user' ? 'selected' : ''}>用户</option>
                         <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>管理员</option>
                     </select>
@@ -40,41 +42,41 @@ function renderUsers(users) {
                 <td style="max-width: 300px;">
                     <div style="display:flex; flex-wrap: wrap; gap:6px; font-size: 0.85rem;">
                         <label style="display:flex; align-items:center; gap:4px;">
-                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="data:view" ${Array.isArray(u.permissions) && u.permissions.includes('data:view') ? 'checked' : ''}>
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="data:view" ${Array.isArray(u.permissions) && u.permissions.includes('data:view') ? 'checked' : ''} ${disableAdminEdits}>
                             <span>结构数据查看</span>
                         </label>
                         <label style="display:flex; align-items:center; gap:4px;">
-                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="data:edit" ${Array.isArray(u.permissions) && u.permissions.includes('data:edit') ? 'checked' : ''}>
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="data:edit" ${Array.isArray(u.permissions) && u.permissions.includes('data:edit') ? 'checked' : ''} ${disableAdminEdits}>
                             <span>结构数据操作</span>
                         </label>
                         <label style="display:flex; align-items:center; gap:4px;">
-                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="schedule:edit" ${Array.isArray(u.permissions) && u.permissions.includes('schedule:edit') ? 'checked' : ''}>
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="schedule:edit" ${Array.isArray(u.permissions) && u.permissions.includes('schedule:edit') ? 'checked' : ''} ${disableAdminEdits}>
                             <span>排程设置操作</span>
                         </label>
                         <label style="display:flex; align-items:center; gap:4px;">
-                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="plan:view" ${Array.isArray(u.permissions) && u.permissions.includes('plan:view') ? 'checked' : ''}>
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="plan:view" ${Array.isArray(u.permissions) && u.permissions.includes('plan:view') ? 'checked' : ''} ${disableAdminEdits}>
                             <span>计划排程查看</span>
                         </label>
                         <label style="display:flex; align-items:center; gap:4px;">
-                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="plan:edit" ${Array.isArray(u.permissions) && u.permissions.includes('plan:edit') ? 'checked' : ''}>
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="plan:edit" ${Array.isArray(u.permissions) && u.permissions.includes('plan:edit') ? 'checked' : ''} ${disableAdminEdits}>
                             <span>计划排程操作</span>
                         </label>
                         <label style="display:flex; align-items:center; gap:4px;">
-                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="plan:export" ${Array.isArray(u.permissions) && u.permissions.includes('plan:export') ? 'checked' : ''}>
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="plan:export" ${Array.isArray(u.permissions) && u.permissions.includes('plan:export') ? 'checked' : ''} ${disableAdminEdits}>
                             <span>计划排程导出</span>
                         </label>
                         <label style="display:flex; align-items:center; gap:4px;">
-                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="details:view" ${Array.isArray(u.permissions) && u.permissions.includes('details:view') ? 'checked' : ''}>
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="details:view" ${Array.isArray(u.permissions) && u.permissions.includes('details:view') ? 'checked' : ''} ${disableAdminEdits}>
                             <span>明细清单查询</span>
                         </label>
                         <label style="display:flex; align-items:center; gap:4px;">
-                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="details:export" ${Array.isArray(u.permissions) && u.permissions.includes('details:export') ? 'checked' : ''}>
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="details:export" ${Array.isArray(u.permissions) && u.permissions.includes('details:export') ? 'checked' : ''} ${disableAdminEdits}>
                             <span>明细清单导出</span>
                         </label>
                     </div>
                 </td>
                 <td>
-                    <input type="checkbox" data-username="${u.username}" data-field="active" ${activeChecked}>
+                    <input type="checkbox" data-username="${u.username}" data-field="active" ${activeChecked} ${disableAdminEdits}>
                 </td>
                 <td>
                     <button class="btn btn-sm btn-secondary" data-action="resetPassword" data-username="${u.username}">重置密码</button>
@@ -210,6 +212,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (!username || !field) return;
             const row = target.closest('tr');
             if (!row) return;
+            if (username === 'admin' && (field === 'role' || field === 'active' || field === 'perm')) {
+                await loadUsers();
+                return;
+            }
 
             if (field === 'role') {
                 await updateUser(username, { role: target.value });
@@ -241,4 +247,3 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     await loadUsers();
 });
-

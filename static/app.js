@@ -1093,6 +1093,7 @@ function formatDate(date) {
 
 let ganttZoomLevel = 1;
 let ganttScrollPosition = 0;
+let ganttTimeContext = null;
 
 function renderGanttTree(scheduleData) {
     const tree = document.getElementById('ganttTree');
@@ -1153,6 +1154,7 @@ function renderGanttTree(scheduleData) {
     const totalDays = Math.round((maxDate - minDate) / (1000 * 60 * 60 * 24)) + 1;
     const totalHours = (maxTime - minTime) / (1000 * 60 * 60);
     const msPerDay = 1000 * 60 * 60 * 24;
+    ganttTimeContext = { minDate: new Date(minDate), totalDays, msPerDay };
     
     const infoDiv = document.getElementById('ganttInfo');
     if (scheduleData.totalStartTime && scheduleData.totalEndTime) {
@@ -1318,7 +1320,7 @@ function renderGanttTree(scheduleData) {
                                 };
                                 
                                 html += `
-                                    <div class="gantt-row gantt-level-4 gantt-order-row" draggable="${canEditPlan ? 'true' : 'false'}"
+                                    <div class="gantt-row gantt-level-4 gantt-order-row" draggable="false"
                                          data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}" data-order-index="${orderIndex}">
                                         <div class="gantt-row-header">
                                             <div class="gantt-toggle" style="visibility: hidden;">+</div>
@@ -1328,8 +1330,11 @@ function renderGanttTree(scheduleData) {
                                                 <span class="row-duration">${orderPos.days}天 (${order.duration}小时/${order.workerCount}人)</span>
                                             </div>
                                         </div>
-                                        <div class="gantt-row-bar-container">
-                                            <div class="gantt-row-bar" style="left: ${orderPos.left}%; width: ${Math.max(orderPos.width, 0.1)}%; background-color: ${colors.order.bg}; color: ${colors.order.text};">
+                                        <div class="gantt-row-bar-container gantt-order-dropzone"
+                                             data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}">
+                                            <div class="gantt-row-bar gantt-order-bar" data-type="order" draggable="${canEditPlan ? 'true' : 'false'}"
+                                                 data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}" data-order-index="${orderIndex}"
+                                                 style="left: ${orderPos.left}%; width: ${Math.max(orderPos.width, 0.1)}%; background-color: ${colors.order.bg}; color: ${colors.order.text};">
                                                 ${orderPos.days}天 (${order.duration}小时/${order.workerCount}人)
                                             </div>
                                         </div>
@@ -1392,9 +1397,9 @@ function setTrainOrderOverride(trainNumber, phaseId, sbopId, orderIds) {
 }
 
 function clearDragClasses(tree) {
-    const dragging = tree.querySelector('.gantt-order-row.dragging');
+    const dragging = tree.querySelector('.gantt-order-bar.dragging');
     if (dragging) dragging.classList.remove('dragging');
-    tree.querySelectorAll('.gantt-order-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+    tree.querySelectorAll('.gantt-order-dropzone.drag-over').forEach(el => el.classList.remove('drag-over'));
 }
 
 function bindGanttOrderDragDrop() {
@@ -1408,16 +1413,16 @@ function bindGanttOrderDragDrop() {
             e.preventDefault();
             return;
         }
-        const row = e.target.closest && e.target.closest('.gantt-order-row');
-        if (!row) return;
-        const trainIndex = parseInt(row.dataset.trainIndex, 10);
-        const phaseIndex = parseInt(row.dataset.phaseIndex, 10);
-        const sbopIndex = parseInt(row.dataset.sbopIndex, 10);
-        const orderIndex = parseInt(row.dataset.orderIndex, 10);
+        const bar = e.target.closest && e.target.closest('.gantt-order-bar[data-type="order"]');
+        if (!bar) return;
+        const trainIndex = parseInt(bar.dataset.trainIndex, 10);
+        const phaseIndex = parseInt(bar.dataset.phaseIndex, 10);
+        const sbopIndex = parseInt(bar.dataset.sbopIndex, 10);
+        const orderIndex = parseInt(bar.dataset.orderIndex, 10);
         if ([trainIndex, phaseIndex, sbopIndex, orderIndex].some(n => Number.isNaN(n))) return;
 
         draggedOrderInfo = { trainIndex, phaseIndex, sbopIndex, orderIndex };
-        row.classList.add('dragging');
+        bar.classList.add('dragging');
         if (e.dataTransfer) {
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', `${trainIndex}:${phaseIndex}:${sbopIndex}:${orderIndex}`);
@@ -1426,27 +1431,26 @@ function bindGanttOrderDragDrop() {
 
     tree.addEventListener('dragover', (e) => {
         if (!draggedOrderInfo) return;
-        const row = e.target.closest && e.target.closest('.gantt-order-row');
-        if (!row) return;
-        const trainIndex = parseInt(row.dataset.trainIndex, 10);
-        const phaseIndex = parseInt(row.dataset.phaseIndex, 10);
-        const sbopIndex = parseInt(row.dataset.sbopIndex, 10);
+        const zone = e.target.closest && e.target.closest('.gantt-order-dropzone');
+        if (!zone) return;
+        const trainIndex = parseInt(zone.dataset.trainIndex, 10);
+        const phaseIndex = parseInt(zone.dataset.phaseIndex, 10);
+        const sbopIndex = parseInt(zone.dataset.sbopIndex, 10);
         if (Number.isNaN(trainIndex) || Number.isNaN(phaseIndex) || Number.isNaN(sbopIndex)) return;
         if (trainIndex !== draggedOrderInfo.trainIndex || phaseIndex !== draggedOrderInfo.phaseIndex || sbopIndex !== draggedOrderInfo.sbopIndex) return;
         e.preventDefault();
         clearDragClasses(tree);
-        row.classList.add('drag-over');
+        zone.classList.add('drag-over');
     });
 
     tree.addEventListener('drop', (e) => {
         if (!draggedOrderInfo) return;
-        const row = e.target.closest && e.target.closest('.gantt-order-row');
-        if (!row) return;
-        const trainIndex = parseInt(row.dataset.trainIndex, 10);
-        const phaseIndex = parseInt(row.dataset.phaseIndex, 10);
-        const sbopIndex = parseInt(row.dataset.sbopIndex, 10);
-        const toOrderIndex = parseInt(row.dataset.orderIndex, 10);
-        if ([trainIndex, phaseIndex, sbopIndex, toOrderIndex].some(n => Number.isNaN(n))) return;
+        const zone = e.target.closest && e.target.closest('.gantt-order-dropzone');
+        if (!zone) return;
+        const trainIndex = parseInt(zone.dataset.trainIndex, 10);
+        const phaseIndex = parseInt(zone.dataset.phaseIndex, 10);
+        const sbopIndex = parseInt(zone.dataset.sbopIndex, 10);
+        if ([trainIndex, phaseIndex, sbopIndex].some(n => Number.isNaN(n))) return;
         if (trainIndex !== draggedOrderInfo.trainIndex || phaseIndex !== draggedOrderInfo.phaseIndex || sbopIndex !== draggedOrderInfo.sbopIndex) return;
         e.preventDefault();
 
@@ -1458,12 +1462,52 @@ function bindGanttOrderDragDrop() {
         if (!sbop || !Array.isArray(sbop.orders)) return;
 
         const fromIndex = draggedOrderInfo.orderIndex;
-        if (fromIndex === toOrderIndex) return;
+        const ctx = ganttTimeContext;
+        if (!ctx || !ctx.minDate || !ctx.totalDays) return;
+
+        const rect = zone.getBoundingClientRect();
+        const x = Math.max(0, Math.min(rect.width, (e.clientX - rect.left)));
+        const dayIndexOverall = Math.min(
+            Math.max(0, Math.floor((x / Math.max(rect.width, 1)) * ctx.totalDays)),
+            ctx.totalDays - 1
+        );
+
+        const sbopStartDayIndex = Math.round((new Date(sbop.start_time).setHours(0, 0, 0, 0) - ctx.minDate.getTime()) / ctx.msPerDay);
+        const sbopEndDayIndex = Math.round((new Date(sbop.end_time).setHours(0, 0, 0, 0) - ctx.minDate.getTime()) / ctx.msPerDay);
+        const sbopDays = Math.max(1, (sbopEndDayIndex - sbopStartDayIndex) + 1);
+
+        const rawOffset = dayIndexOverall - sbopStartDayIndex;
+        const targetDayOffset = Math.max(0, Math.min(sbopDays - 1, rawOffset));
+
+        const takt = Math.max(1, parseInt(sbop.takt, 10) || 1);
+        // 不再强制对齐到节拍第一项，而是允许在当天内自由插入
+        // 这里计算该天起始位置
+        const targetBaseIndex = targetDayOffset * takt;
+        
+        // 进一步根据鼠标在当前天区块内的 X 比例，计算在这一天内多个工单中的细分插入位置
+        // 这样可以实现同1天内顺序的自由交换
+        const dayWidth = rect.width / ctx.totalDays;
+        const xInDay = x - (dayIndexOverall * dayWidth);
+        const fractionInDay = Math.max(0, Math.min(1, xInDay / dayWidth));
+        
+        // 该天原本有多少个工单
+        const ordersInTargetDay = sbop.orders.filter((o, idx) => Math.floor(idx / takt) === targetDayOffset);
+        // 根据比例计算在当天的相对插入索引
+        const relativeInsertIndex = Math.floor(fractionInDay * (ordersInTargetDay.length + 1));
+        
+        // 最终插入索引 = 该天起始索引 + 相对索引
+        let insertIndex = targetBaseIndex + relativeInsertIndex;
 
         const orders = sbop.orders.slice();
         const [moved] = orders.splice(fromIndex, 1);
         if (!moved) return;
-        const insertIndex = toOrderIndex > fromIndex ? toOrderIndex - 1 : toOrderIndex;
+
+        // 如果插入点在被移除项之后，由于数组少了一个元素，索引需减1
+        if (insertIndex > fromIndex) {
+            insertIndex--;
+        }
+        
+        insertIndex = Math.max(0, Math.min(orders.length, insertIndex));
         orders.splice(insertIndex, 0, moved);
         const orderIds = orders.map(o => o.id);
         setTrainOrderOverride(train.number, phase.id, sbop.id, orderIds);

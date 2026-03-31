@@ -37,12 +37,41 @@ function renderUsers(users) {
                         <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>管理员</option>
                     </select>
                 </td>
-                <td>
-                    <label style="display:flex; align-items:center; gap:6px;">
-                        <input type="checkbox" data-username="${u.username}" data-field="stateWrite" ${Array.isArray(u.permissions) && u.permissions.includes('state:write') ? 'checked' : ''}>
-                        <span>编辑/保存数据</span>
-                    </label>
-                    <div style="color:#666; font-size:0.85rem; margin-top:4px;">${perms}</div>
+                <td style="max-width: 300px;">
+                    <div style="display:flex; flex-wrap: wrap; gap:6px; font-size: 0.85rem;">
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="data:view" ${Array.isArray(u.permissions) && u.permissions.includes('data:view') ? 'checked' : ''}>
+                            <span>结构数据查看</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="data:edit" ${Array.isArray(u.permissions) && u.permissions.includes('data:edit') ? 'checked' : ''}>
+                            <span>结构数据操作</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="schedule:edit" ${Array.isArray(u.permissions) && u.permissions.includes('schedule:edit') ? 'checked' : ''}>
+                            <span>排程设置操作</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="plan:view" ${Array.isArray(u.permissions) && u.permissions.includes('plan:view') ? 'checked' : ''}>
+                            <span>计划排程查看</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="plan:edit" ${Array.isArray(u.permissions) && u.permissions.includes('plan:edit') ? 'checked' : ''}>
+                            <span>计划排程操作</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="plan:export" ${Array.isArray(u.permissions) && u.permissions.includes('plan:export') ? 'checked' : ''}>
+                            <span>计划排程导出</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="details:view" ${Array.isArray(u.permissions) && u.permissions.includes('details:view') ? 'checked' : ''}>
+                            <span>明细清单查询</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <input type="checkbox" data-username="${u.username}" data-field="perm" value="details:export" ${Array.isArray(u.permissions) && u.permissions.includes('details:export') ? 'checked' : ''}>
+                            <span>明细清单导出</span>
+                        </label>
+                    </div>
                 </td>
                 <td>
                     <input type="checkbox" data-username="${u.username}" data-field="active" ${activeChecked}>
@@ -79,8 +108,14 @@ function readNewUserPayload() {
     const password = document.getElementById('newPassword')?.value || '';
     const role = document.getElementById('newRole')?.value || 'user';
     const permissions = [];
-    const stateWrite = document.getElementById('permStateWrite')?.checked;
-    if (stateWrite) permissions.push('state:write');
+    if (document.getElementById('permDataView')?.checked) permissions.push('data:view');
+    if (document.getElementById('permDataEdit')?.checked) permissions.push('data:edit');
+    if (document.getElementById('permScheduleEdit')?.checked) permissions.push('schedule:edit');
+    if (document.getElementById('permPlanView')?.checked) permissions.push('plan:view');
+    if (document.getElementById('permPlanEdit')?.checked) permissions.push('plan:edit');
+    if (document.getElementById('permPlanExport')?.checked) permissions.push('plan:export');
+    if (document.getElementById('permDetailsView')?.checked) permissions.push('details:view');
+    if (document.getElementById('permDetailsExport')?.checked) permissions.push('details:export');
     return { username, password, role, permissions, active: true };
 }
 
@@ -142,8 +177,10 @@ async function resetPassword(username) {
 
 function extractPermissionsFromRow(row) {
     const perms = [];
-    const stateWrite = row.querySelector('input[data-field="stateWrite"]')?.checked;
-    if (stateWrite) perms.push('state:write');
+    const checkboxes = row.querySelectorAll('input[data-field="perm"]');
+    checkboxes.forEach(cb => {
+        if (cb.checked) perms.push(cb.value);
+    });
     return perms;
 }
 
@@ -184,7 +221,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 await loadUsers();
                 return;
             }
-            if (field === 'stateWrite') {
+            if (field === 'perm') {
                 const permissions = extractPermissionsFromRow(row);
                 await updateUser(username, { permissions });
                 await loadUsers();

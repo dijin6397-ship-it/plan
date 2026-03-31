@@ -209,7 +209,7 @@ def _init_auth_db():
                             ADMIN_USERNAME,
                             generate_password_hash(ADMIN_PASSWORD),
                             "admin",
-                            json.dumps(["state:write", "admin"]),
+                            json.dumps(["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]),
                             True,
                             now,
                             now,
@@ -225,7 +225,7 @@ def _init_auth_db():
                         (
                             generate_password_hash(ADMIN_PASSWORD),
                             "admin",
-                            json.dumps(["state:write", "admin"]),
+                            json.dumps(["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]),
                             True,
                             now,
                             ADMIN_USERNAME,

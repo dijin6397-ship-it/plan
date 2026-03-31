@@ -60,22 +60,24 @@
                 </div>
 
                 <div id="ganttTab" class="tab-content active">
-                    <div class="gantt-header">
-                        <h3>生产计划排程甘特图</h3>
-                        <div class="gantt-info" id="ganttInfo"></div>
-                    </div>
-                    <div class="gantt-toolbar">
-                        <button class="btn btn-sm" onclick="expandAllGantt()">全部展开</button>
-                        <button class="btn btn-sm" onclick="collapseAllGantt()">全部收缩</button>
-                        <button class="btn btn-sm btn-success" onclick="exportGanttToExcel()">导出甘特图(Excel)</button>
-                    </div>
-                    <div class="gantt-container" id="ganttContainer">
-                        <div id="ganttTree" class="gantt-tree"></div>
-                        <canvas id="ganttChart" style="display: none;"></canvas>
+                    <div id="ganttTopSection">
+                        <div class="gantt-header">
+                            <h3>生产计划排程甘特图</h3>
+                            <div class="gantt-info" id="ganttInfo"></div>
+                        </div>
+                        <div class="gantt-toolbar">
+                            <button class="btn btn-sm" onclick="expandAllGantt()">全部展开</button>
+                            <button class="btn btn-sm" onclick="collapseAllGantt()">全部收缩</button>
+                            <button id="exportGanttBtn" class="btn btn-sm btn-success" onclick="exportGanttToExcel()">导出甘特图(Excel)</button>
+                        </div>
+                        <div class="gantt-container" id="ganttContainer">
+                            <div id="ganttTree" class="gantt-tree"></div>
+                            <canvas id="ganttChart" style="display: none;"></canvas>
+                        </div>
                     </div>
 
                     <!-- 新增：甘特图下方的查询明细清单区域 -->
-                    <div class="search-details-section">
+                    <div id="detailsSection" class="search-details-section">
                         <div class="section-header">
                             <h3>明细清单查询</h3>
                             <div class="search-toolbar-bottom">
@@ -92,7 +94,7 @@
                                 <span class="view-label">结束日期：</span>
                                 <input type="date" id="filterEndDate">
                                 <button class="btn btn-primary btn-sm" onclick="searchDetails()">查询明细</button>
-                                <button class="btn btn-success btn-sm" onclick="exportDetailsToExcel()">导出Excel</button>
+                                <button id="exportDetailsBtn" class="btn btn-success btn-sm" onclick="exportDetailsToExcel()">导出Excel</button>
                                 <button class="btn btn-sm" onclick="resetFilters()">重置</button>
                             </div>
                         </div>
@@ -148,7 +150,7 @@
                         <div class="team-management">
                             <div class="form-group">
                                 <input type="text" id="newTeamName" placeholder="输入新班组名称">
-                                <button class="btn btn-primary" onclick="addTeam()">添加班组</button>
+                                <button id="addTeamBtn" class="btn btn-primary" onclick="addTeam()">添加班组</button>
                             </div>
                             <div id="teamList" class="team-list">
                                 <!-- 班组列表将通过 JS 渲染 -->

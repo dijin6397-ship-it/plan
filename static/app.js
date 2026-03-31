@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (isHttpMode() && !location.pathname.endsWith('/login.html') && !location.pathname.endsWith('login.html')) {
         const ok = await ensureAuthenticated();
         if (!ok) return;
+    } else {
+        applyPermissions();
     }
     initializeDateTimeInput();
     loadTemplates();
@@ -33,12 +35,22 @@ function isHttpMode() {
     return location.protocol === 'http:' || location.protocol === 'https:';
 }
 
-function canWriteState() {
+function hasPermission(perm) {
     if (!isHttpMode()) return true;
     if (!currentUser) return false;
     if (currentUser.role === 'admin') return true;
     const perms = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
-    return perms.includes('state:write');
+    if (perms.includes('state:write')) return true; // legacy support
+    return perms.includes(perm);
+}
+
+function canWriteState() {
+    // For general state writing (like pushing state to server), we allow if they have any edit permission
+    if (!isHttpMode()) return true;
+    if (!currentUser) return false;
+    if (currentUser.role === 'admin') return true;
+    const perms = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    return perms.includes('state:write') || perms.includes('data:edit') || perms.includes('schedule:edit') || perms.includes('plan:edit');
 }
 
 async function ensureAuthenticated() {
@@ -82,24 +94,98 @@ function updateUserBar() {
 }
 
 function applyPermissions() {
-    const writable = canWriteState();
-    const ids = [
-        'saveTemplateBtn',
-        'deleteTemplateBtn',
-        'importTemplateBtn',
-        'addPhaseBtn',
-        'scheduleBtn',
-        'clearScheduleBtn'
-    ];
-    ids.forEach(id => {
+    const permDataView = hasPermission('data:view');
+    const permDataEdit = hasPermission('data:edit');
+    const permScheduleEdit = hasPermission('schedule:edit');
+    const permPlanView = hasPermission('plan:view');
+    const permPlanEdit = hasPermission('plan:edit');
+    const permPlanExport = hasPermission('plan:export');
+    const permDetailsView = hasPermission('details:view');
+    const permDetailsExport = hasPermission('details:export');
+
+    // Tabs visibility
+    const dataTabBtn = document.querySelector('button[data-tab="data"]');
+    if (dataTabBtn) dataTabBtn.style.display = permDataView ? 'inline-block' : 'none';
+    const dataTab = document.getElementById('dataTab');
+    if (dataTab && !permDataView) {
+        dataTab.classList.remove('active');
+        if (dataTabBtn) dataTabBtn.classList.remove('active');
+    }
+
+    const ganttTabBtn = document.querySelector('button[data-tab="gantt"]');
+    if (ganttTabBtn) ganttTabBtn.style.display = (permPlanView || permDetailsView) ? 'inline-block' : 'none';
+    if (ganttTabBtn && !permPlanView && !permDetailsView) {
+        ganttTabBtn.classList.remove('active');
+        const ganttTab = document.getElementById('ganttTab');
+        if (ganttTab) ganttTab.classList.remove('active');
+    }
+
+    // Auto-select first available tab if current is hidden
+    if (ganttTabBtn && dataTabBtn) {
+        if (!ganttTabBtn.classList.contains('active') && !dataTabBtn.classList.contains('active')) {
+            if (permPlanView || permDetailsView) {
+                ganttTabBtn.classList.add('active');
+                if (document.getElementById('ganttTab')) document.getElementById('ganttTab').classList.add('active');
+            } else if (permDataView) {
+                dataTabBtn.classList.add('active');
+                if (document.getElementById('dataTab')) document.getElementById('dataTab').classList.add('active');
+            }
+        }
+    }
+
+    // data:edit elements
+    const dataEditIds = ['saveTemplateBtn', 'importTemplateBtn', 'deleteTemplateBtn', 'addPhaseBtn', 'addTeamBtn'];
+    dataEditIds.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.disabled = !writable;
-        if (!writable) el.classList.add('disabled');
+        el.disabled = !permDataEdit;
+        if (!permDataEdit) el.classList.add('disabled');
         else el.classList.remove('disabled');
     });
     const newTeamName = document.getElementById('newTeamName');
-    if (newTeamName) newTeamName.disabled = !writable;
+    if (newTeamName) newTeamName.disabled = !permDataEdit;
+
+    // schedule:edit elements
+    const scheduleEditIds = ['trainNumberInput', 'templateSelect', 'startTime', 'scheduleBtn', 'clearScheduleBtn'];
+    scheduleEditIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = !permScheduleEdit;
+        if (!permScheduleEdit) el.classList.add('disabled');
+        else el.classList.remove('disabled');
+    });
+
+    // plan:view elements
+    const ganttTopSection = document.getElementById('ganttTopSection');
+    if (ganttTopSection) ganttTopSection.style.display = permPlanView ? 'block' : 'none';
+
+    // plan:export elements
+    const exportGanttBtn = document.getElementById('exportGanttBtn');
+    if (exportGanttBtn) {
+        exportGanttBtn.disabled = !permPlanExport;
+        if (!permPlanExport) exportGanttBtn.style.display = 'none';
+        else exportGanttBtn.style.display = 'inline-block';
+    }
+
+    // details:view elements
+    const detailsSection = document.getElementById('detailsSection');
+    if (detailsSection) detailsSection.style.display = permDetailsView ? 'block' : 'none';
+
+    // details:export elements
+    const exportDetailsBtn = document.getElementById('exportDetailsBtn');
+    if (exportDetailsBtn) {
+        exportDetailsBtn.disabled = !permDetailsExport;
+        if (!permDetailsExport) exportDetailsBtn.style.display = 'none';
+        else exportDetailsBtn.style.display = 'inline-block';
+    }
+
+    // For re-rendering components that check permissions inside their render functions
+    renderTeams();
+    renderDataTree();
+    renderTrainPlans();
+    if (ganttChart || document.getElementById('ganttTree')?.innerHTML) {
+        renderGantt();
+    }
 }
 
 function isEditingLocked() {
@@ -311,13 +397,15 @@ function renderTrainPlanList() {
         return;
     }
 
+    const canEdit = hasPermission('plan:edit');
+
     container.innerHTML = trainPlans.map(p => `
         <div class="train-plan-item">
             <div class="train-plan-meta" onclick="selectTrainPlan('${p.number}')">
                 <div class="train-plan-title">列车号 ${p.number}</div>
                 <div class="train-plan-subtitle">${p.startTime}｜${p.templateName}</div>
             </div>
-            <button class="train-plan-remove" onclick="removeTrainPlan('${p.number}')">&times;</button>
+            <button class="train-plan-remove" style="${canEdit ? '' : 'display:none;'}" onclick="removeTrainPlan('${p.number}')">&times;</button>
         </div>
     `).join('');
 }
@@ -435,10 +523,11 @@ function deleteTeam(name) {
 function renderTeamList() {
     const list = document.getElementById('teamList');
     if (!list) return;
+    const canEdit = hasPermission('data:edit');
     list.innerHTML = teamDictionary.map(team => `
         <div class="team-tag">
             <span>${team}</span>
-            <button onclick="deleteTeam('${team}')">&times;</button>
+            <button ${canEdit ? '' : 'style="display:none;"'} onclick="deleteTeam('${team}')">&times;</button>
         </div>
     `).join('');
 }
@@ -1190,6 +1279,7 @@ function renderGanttTree(scheduleData) {
                         
                         // 工单层级 - 按天展示
                         if (sbop.orders) {
+                            const canEditPlan = hasPermission('plan:edit');
                             sbop.orders.forEach((order, orderIndex) => {
                                 const orderPos = {
                                     left: (Math.round((new Date(order.start_time).setHours(0,0,0,0) - minDate.getTime()) / msPerDay) / totalDays) * 100,
@@ -1198,7 +1288,7 @@ function renderGanttTree(scheduleData) {
                                 };
                                 
                                 html += `
-                                    <div class="gantt-row gantt-level-4 gantt-order-row" draggable="true"
+                                    <div class="gantt-row gantt-level-4 gantt-order-row" draggable="${canEditPlan ? 'true' : 'false'}"
                                          data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}" data-order-index="${orderIndex}">
                                         <div class="gantt-row-header">
                                             <div class="gantt-toggle" style="visibility: hidden;">+</div>
@@ -1284,6 +1374,10 @@ function bindGanttOrderDragDrop() {
     ganttDndBound = true;
 
     tree.addEventListener('dragstart', (e) => {
+        if (!hasPermission('plan:edit')) {
+            e.preventDefault();
+            return;
+        }
         const row = e.target.closest && e.target.closest('.gantt-order-row');
         if (!row) return;
         const trainIndex = parseInt(row.dataset.trainIndex, 10);
@@ -1619,13 +1713,15 @@ function renderDataTree() {
     
     let html = '';
     
+    const canEditData = hasPermission('data:edit');
+
     templateData.forEach((phase, phaseIndex) => {
         html += `
             <div class="tree-item">
                 <div class="tree-header phase" onclick="toggleDataTreeRow(this)">
                     <div class="tree-toggle expanded">−</div>
                     <span class="tree-title">${phase.name} (第${phase.startDayOffset || 1}天开始)</span>
-                    <div class="tree-actions" onclick="event.stopPropagation()">
+                    <div class="tree-actions" style="${canEditData ? '' : 'display:none;'}" onclick="event.stopPropagation()">
                         <button class="btn-add" onclick="showAddSBOPModal(${phaseIndex})">添加SBOP</button>
                         <button class="btn-edit" onclick="showEditPhaseModal(${phaseIndex})">编辑</button>
                         <button class="btn-delete" onclick="deletePhase(${phaseIndex})">删除</button>
@@ -1652,7 +1748,7 @@ function renderDataTree() {
                             <span class="tree-title">${sbop.name} (阶段第${sbop.startDayOffset || 1}天开始)</span>
                             <span class="tree-info">节拍: ${sbop.takt || 3} | 总工时: ${sbop.totalHours || 0}h | 人数: ${sbop.workerCount || 1} | 总工单: ${totalWorkOrders}${sbop.team ? ' | 班组: ' + sbop.team : ''}</span>
                             <div class="car-info-badge">${carInfo || '无车工单'}</div>
-                            <div class="tree-actions" onclick="event.stopPropagation()">
+                            <div class="tree-actions" style="${canEditData ? '' : 'display:none;'}" onclick="event.stopPropagation()">
                                 <button class="btn-edit" onclick="showEditSBOPModal(${phaseIndex}, ${sbopIndex})">编辑SBOP</button>
                                 <button class="btn-delete" onclick="deleteSBOP(${phaseIndex}, ${sbopIndex})">删除</button>
                             </div>

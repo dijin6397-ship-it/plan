@@ -48,12 +48,20 @@ async function ensureAuthenticated() {
             location.href = '/login.html';
             return false;
         }
-        if (!res.ok) return true;
+        if (!res.ok) {
+            currentUser = null;
+            updateUserBar();
+            applyPermissions();
+            return true;
+        }
         currentUser = await res.json();
         updateUserBar();
         applyPermissions();
         return true;
     } catch (e) {
+        currentUser = null;
+        updateUserBar();
+        applyPermissions();
         return true;
     }
 }
@@ -100,9 +108,13 @@ function isEditingLocked() {
 }
 
 function markStateDirty(immediate = false) {
-    if (isHttpMode() && currentUser && !canWriteState()) {
-        alert('当前账号无编辑权限。');
-        pullStateFromServer({ force: true });
+    if (isHttpMode() && !canWriteState()) {
+        alert(currentUser ? '当前账号无编辑权限。' : '请先登录。');
+        if (!currentUser) {
+            location.href = '/login.html';
+        } else {
+            pullStateFromServer({ force: true });
+        }
         return;
     }
     stateDirty = true;

@@ -3,6 +3,13 @@ function setAdminMsg(text) {
     if (el) el.textContent = text || '';
 }
 
+function formatAdminError(err) {
+    const e = (err || '').toString();
+    if (e === 'auth_storage_not_configured') return '未配置用户存储（需要配置 POSTGRES_URL 或 KV_REST_API_*）';
+    if (e === 'auth_db_error') return '用户数据库不可用（Postgres 连接失败/表异常）';
+    return e;
+}
+
 async function ensureAdmin() {
     const res = await fetch('/api/me', { cache: 'no-store' });
     if (res.status === 401) {
@@ -136,7 +143,7 @@ async function createUser() {
     });
     if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setAdminMsg(data.error ? `创建失败：${data.error}` : '创建失败。');
+        setAdminMsg(data.error ? `创建失败：${formatAdminError(data.error)}` : '创建失败。');
         return;
     }
     document.getElementById('newUsername').value = '';
@@ -153,7 +160,7 @@ async function updateUser(username, payload) {
     });
     if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setAdminMsg(data.error ? `更新失败：${data.error}` : '更新失败。');
+        setAdminMsg(data.error ? `更新失败：${formatAdminError(data.error)}` : '更新失败。');
         return false;
     }
     return true;
@@ -165,7 +172,7 @@ async function deleteUser(username) {
     const res = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
     if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setAdminMsg(data.error ? `删除失败：${data.error}` : '删除失败。');
+        setAdminMsg(data.error ? `删除失败：${formatAdminError(data.error)}` : '删除失败。');
         return;
     }
     await loadUsers();

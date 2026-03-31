@@ -25,15 +25,18 @@ STATIC_DIR = BASE_DIR / "static"
 DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "state.json"
 _state_lock = Lock()
+_auth_lock = Lock()
 POSTGRES_URL = os.environ.get("POSTGRES_URL")
 KV_REST_API_URL = os.environ.get("KV_REST_API_URL")
 
 KV_REST_API_TOKEN = os.environ.get("KV_REST_API_TOKEN")
 KV_STATE_KEY = os.environ.get("STATE_KV_KEY", "plan_state")
+KV_USERS_KEY = os.environ.get("USERS_KV_KEY", "plan_users")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "0") == "1"
+USERS_FILE = DATA_DIR / "users.json"
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY or secrets.token_hex(32)
@@ -292,15 +295,51 @@ def _init_pg_db():
     except Exception as e:
         print(f"Error initializing Postgres DB: {e}")
 
-# Initialize DB on startup
-_init_pg_db()
-try:
-    _init_auth_db()
-except Exception as e:
-    print(f"Error initializing auth DB: {e}")
-
 def _use_kv():
     return bool(KV_REST_API_URL and KV_REST_API_TOKEN)
+
+def _auth_backend():
+    if _use_auth_pg():
+        return "pg"
+    if _use_kv():
+        return "kv"
+    return "file"
+
+def _load_users_store():
+    backend = _auth_backend()
+    if backend == "pg":
+        return {}
+    if backend == "kv":
+        try:
+            raw = _kv_get(KV_USERS_KEY)
+            if not raw:
+                return {}
+            data = json.loads(raw) if isinstance(raw, str) and raw.strip() else {}
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not USERS_FILE.exists():
+        return {}
+    try:
+        raw = USERS_FILE.read_text(encoding="utf-8")
+        data = json.loads(raw) if raw.strip() else {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def _save_users_store(store: dict):
+    backend = _auth_backend()
+    if backend == "pg":
+        return
+    payload = json.dumps(store, ensure_ascii=False)
+    if backend == "kv":
+        _kv_set(KV_USERS_KEY, payload)
+        return
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = USERS_FILE.with_suffix(".tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(USERS_FILE)
 
 
 def _kv_pipeline(commands):
@@ -331,6 +370,54 @@ def _kv_get(key: str):
 
 def _kv_set(key: str, value: str):
     _kv_pipeline([["SET", key, value]])
+
+def _init_auth_fallback():
+    if _use_auth_pg():
+        return
+    now = datetime.utcnow().isoformat()
+    admin_perms = ["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]
+    with _auth_lock:
+        store = _load_users_store()
+        cur = store.get(ADMIN_USERNAME)
+        if not isinstance(cur, dict) and not ADMIN_PASSWORD:
+            return
+        if not isinstance(cur, dict):
+            if not ADMIN_PASSWORD:
+                return
+            store[ADMIN_USERNAME] = {
+                "username": ADMIN_USERNAME,
+                "password_hash": generate_password_hash(ADMIN_PASSWORD),
+                "role": "admin",
+                "permissions": admin_perms,
+                "active": True,
+                "created_at": now,
+                "updated_at": now,
+            }
+        else:
+            cur["username"] = ADMIN_USERNAME
+            cur["role"] = "admin"
+            cur["permissions"] = admin_perms
+            cur["active"] = True
+            cur["created_at"] = cur.get("created_at") or now
+            cur["updated_at"] = now
+            if ADMIN_PASSWORD:
+                cur["password_hash"] = generate_password_hash(ADMIN_PASSWORD)
+            store[ADMIN_USERNAME] = cur
+        _save_users_store(store)
+
+# Initialize DB on startup
+try:
+    _init_pg_db()
+except Exception as e:
+    print(f"Error initializing Postgres DB: {e}")
+try:
+    _init_auth_db()
+except Exception as e:
+    print(f"Error initializing auth DB: {e}")
+try:
+    _init_auth_fallback()
+except Exception as e:
+    print(f"Error initializing auth store: {e}")
 
 
 def _load_state():
@@ -472,28 +559,47 @@ def _get_user(username: str):
                     return row
         except Exception:
             return None
-    return None
+    try:
+        store = _load_users_store()
+        user = store.get(u)
+        if not isinstance(user, dict):
+            return None
+        if isinstance(user.get("permissions"), str):
+            try:
+                user["permissions"] = json.loads(user["permissions"])
+            except Exception:
+                user["permissions"] = []
+        return user
+    except Exception:
+        return None
 
 def _list_users():
-    if not _use_auth_pg():
-        return []
-    with _get_pg_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM app_users ORDER BY username ASC")
-            rows = cur.fetchall() or []
-            out = []
-            for row in rows:
-                if isinstance(row.get("permissions"), str):
-                    try:
-                        row["permissions"] = json.loads(row["permissions"])
-                    except Exception:
-                        row["permissions"] = []
-                out.append(row)
-            return out
+    if _use_auth_pg():
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM app_users ORDER BY username ASC")
+                rows = cur.fetchall() or []
+                out = []
+                for row in rows:
+                    if isinstance(row.get("permissions"), str):
+                        try:
+                            row["permissions"] = json.loads(row["permissions"])
+                        except Exception:
+                            row["permissions"] = []
+                    out.append(row)
+                return out
+    store = _load_users_store()
+    users = [v for v in store.values() if isinstance(v, dict)]
+    users.sort(key=lambda x: (x.get("username") or "").lower())
+    for u in users:
+        if isinstance(u.get("permissions"), str):
+            try:
+                u["permissions"] = json.loads(u["permissions"])
+            except Exception:
+                u["permissions"] = []
+    return users
 
 def _create_user(username: str, password: str, role: str, permissions, active: bool = True):
-    if not _use_auth_pg():
-        raise RuntimeError("auth storage not configured")
     u = (username or "").strip()
     if not u:
         raise ValueError("username required")
@@ -502,46 +608,76 @@ def _create_user(username: str, password: str, role: str, permissions, active: b
     r = role if role in ("admin", "user") else "user"
     perms = permissions if isinstance(permissions, list) else []
     now = datetime.utcnow().isoformat()
-    with _get_pg_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT username FROM app_users WHERE username = %s", (u,))
-            if cur.fetchone():
-                raise ValueError("user exists")
-            cur.execute(
-                """
-                INSERT INTO app_users (username, password_hash, role, permissions, active, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                (u, generate_password_hash(password), r, json.dumps(perms), bool(active), now, now),
-            )
-        conn.commit()
+    if _use_auth_pg():
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT username FROM app_users WHERE username = %s", (u,))
+                if cur.fetchone():
+                    raise ValueError("user exists")
+                cur.execute(
+                    """
+                    INSERT INTO app_users (username, password_hash, role, permissions, active, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (u, generate_password_hash(password), r, json.dumps(perms), bool(active), now, now),
+                )
+            conn.commit()
+        return
+    with _auth_lock:
+        store = _load_users_store()
+        if u in store:
+            raise ValueError("user exists")
+        store[u] = {
+            "username": u,
+            "password_hash": generate_password_hash(password),
+            "role": r,
+            "permissions": perms,
+            "active": bool(active),
+            "created_at": now,
+            "updated_at": now,
+        }
+        _save_users_store(store)
 
 def _update_user(username: str, updates: dict):
-    if not _use_auth_pg():
-        raise RuntimeError("auth storage not configured")
     u = (username or "").strip()
     if not u:
         raise ValueError("username required")
     now = datetime.utcnow().isoformat()
     if u == ADMIN_USERNAME:
-        sets = []
-        params = []
-        if "password" in updates and updates["password"]:
-            sets.append("password_hash = %s")
-            params.append(generate_password_hash(updates["password"]))
-        sets.append("role = %s")
-        params.append("admin")
-        sets.append("permissions = %s")
-        params.append(json.dumps(["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]))
-        sets.append("active = %s")
-        params.append(True)
-        sets.append("updated_at = %s")
-        params.append(now)
-        params.append(u)
-        with _get_pg_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE username = %s", tuple(params))
-            conn.commit()
+        admin_perms = ["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]
+        if _use_auth_pg():
+            sets = []
+            params = []
+            if "password" in updates and updates["password"]:
+                sets.append("password_hash = %s")
+                params.append(generate_password_hash(updates["password"]))
+            sets.append("role = %s")
+            params.append("admin")
+            sets.append("permissions = %s")
+            params.append(json.dumps(admin_perms))
+            sets.append("active = %s")
+            params.append(True)
+            sets.append("updated_at = %s")
+            params.append(now)
+            params.append(u)
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE username = %s", tuple(params))
+                conn.commit()
+            return
+        with _auth_lock:
+            store = _load_users_store()
+            cur = store.get(u)
+            if not isinstance(cur, dict):
+                raise ValueError("user not found")
+            if "password" in updates and updates["password"]:
+                cur["password_hash"] = generate_password_hash(updates["password"])
+            cur["role"] = "admin"
+            cur["permissions"] = admin_perms
+            cur["active"] = True
+            cur["updated_at"] = now
+            store[u] = cur
+            _save_users_store(store)
         return
     sets = []
     params = []
@@ -562,23 +698,47 @@ def _update_user(username: str, updates: dict):
     if not sets:
         return
     params.append(u)
-    with _get_pg_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE username = %s", tuple(params))
-        conn.commit()
+    if _use_auth_pg():
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE app_users SET {', '.join(sets)} WHERE username = %s", tuple(params))
+            conn.commit()
+        return
+    with _auth_lock:
+        store = _load_users_store()
+        cur = store.get(u)
+        if not isinstance(cur, dict):
+            raise ValueError("user not found")
+        if "password" in updates and updates["password"]:
+            cur["password_hash"] = generate_password_hash(updates["password"])
+        if "role" in updates and updates["role"] in ("admin", "user"):
+            cur["role"] = updates["role"]
+        if "permissions" in updates and isinstance(updates["permissions"], list):
+            cur["permissions"] = updates["permissions"]
+        if "active" in updates:
+            cur["active"] = bool(updates["active"])
+        cur["updated_at"] = now
+        store[u] = cur
+        _save_users_store(store)
 
 def _delete_user(username: str):
-    if not _use_auth_pg():
-        raise RuntimeError("auth storage not configured")
     u = (username or "").strip()
     if not u:
         raise ValueError("username required")
     if u == ADMIN_USERNAME:
         raise ValueError("cannot delete admin")
-    with _get_pg_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM app_users WHERE username = %s", (u,))
-        conn.commit()
+    if _use_auth_pg():
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM app_users WHERE username = %s", (u,))
+            conn.commit()
+        return
+    with _auth_lock:
+        store = _load_users_store()
+        if u not in store:
+            raise ValueError("user not found")
+        del store[u]
+        _save_users_store(store)
 
 
 @app.get("/api/me")
@@ -602,7 +762,7 @@ def api_login():
     if not _verify_captcha(captcha_token, captcha_answer):
         return jsonify({"error": "captcha"}), 400
 
-    if _use_auth_pg() and not _get_user(ADMIN_USERNAME) and not ADMIN_PASSWORD:
+    if not _get_user(ADMIN_USERNAME) and not ADMIN_PASSWORD:
         return jsonify({"error": "admin_not_initialized"}), 503
 
     user = _get_user(username)
@@ -643,6 +803,10 @@ def api_users_create():
         return jsonify({"ok": True})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except RuntimeError:
+        return jsonify({"error": "auth_storage_not_configured"}), 503
+    except psycopg2.Error:
+        return jsonify({"error": "auth_db_error"}), 503
     except Exception:
         return jsonify({"error": "create_failed"}), 500
 
@@ -656,6 +820,10 @@ def api_users_update(username: str):
         return jsonify({"ok": True})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except RuntimeError:
+        return jsonify({"error": "auth_storage_not_configured"}), 503
+    except psycopg2.Error:
+        return jsonify({"error": "auth_db_error"}), 503
     except Exception:
         return jsonify({"error": "update_failed"}), 500
 
@@ -668,6 +836,10 @@ def api_users_delete(username: str):
         return jsonify({"ok": True})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except RuntimeError:
+        return jsonify({"error": "auth_storage_not_configured"}), 503
+    except psycopg2.Error:
+        return jsonify({"error": "auth_db_error"}), 503
     except Exception:
         return jsonify({"error": "delete_failed"}), 500
 

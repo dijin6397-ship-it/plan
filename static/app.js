@@ -81,13 +81,36 @@ async function ensureAuthenticated() {
 
 function updateUserBar() {
     const el = document.getElementById('userInfo');
-    const btn = document.getElementById('logoutBtn');
-    const adminLink = document.getElementById('adminLink');
+    const actionsContainer = document.querySelector('.header-actions') || (el ? el.parentElement : null);
+    let btn = document.getElementById('logoutBtn');
+    let adminLink = document.getElementById('adminLink');
     if (el && currentUser && currentUser.username) {
         el.textContent = `当前账号：${currentUser.username}`;
     }
+    if (!btn && actionsContainer) {
+        btn = document.createElement('button');
+        btn.id = 'logoutBtn';
+        btn.className = 'btn btn-sm';
+        btn.type = 'button';
+        btn.textContent = '退出登录';
+        btn.style.display = 'none';
+        actionsContainer.appendChild(btn);
+    }
     if (btn) {
         btn.style.display = currentUser ? 'inline-flex' : 'none';
+    }
+    if (!adminLink && actionsContainer) {
+        adminLink = document.createElement('a');
+        adminLink.id = 'adminLink';
+        adminLink.className = 'btn btn-sm btn-secondary';
+        adminLink.href = 'admin.html';
+        adminLink.textContent = '账号及权限';
+        adminLink.style.display = 'none';
+        if (btn && btn.parentElement === actionsContainer) {
+            actionsContainer.insertBefore(adminLink, btn);
+        } else {
+            actionsContainer.appendChild(adminLink);
+        }
     }
     if (adminLink) {
         const perms = currentUser && Array.isArray(currentUser.permissions) ? currentUser.permissions : [];

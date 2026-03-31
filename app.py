@@ -197,23 +197,40 @@ def _init_auth_db():
             """)
             cur.execute("SELECT username FROM app_users WHERE username = %s", (ADMIN_USERNAME,))
             exists = cur.fetchone()
-            if not exists and ADMIN_PASSWORD:
+            if ADMIN_PASSWORD:
                 now = datetime.utcnow().isoformat()
-                cur.execute(
-                    """
-                    INSERT INTO app_users (username, password_hash, role, permissions, active, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        ADMIN_USERNAME,
-                        generate_password_hash(ADMIN_PASSWORD),
-                        "admin",
-                        json.dumps(["state:write", "admin"]),
-                        True,
-                        now,
-                        now,
-                    ),
-                )
+                if not exists:
+                    cur.execute(
+                        """
+                        INSERT INTO app_users (username, password_hash, role, permissions, active, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            ADMIN_USERNAME,
+                            generate_password_hash(ADMIN_PASSWORD),
+                            "admin",
+                            json.dumps(["state:write", "admin"]),
+                            True,
+                            now,
+                            now,
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE app_users
+                        SET password_hash = %s, role = %s, permissions = %s, active = %s, updated_at = %s
+                        WHERE username = %s
+                        """,
+                        (
+                            generate_password_hash(ADMIN_PASSWORD),
+                            "admin",
+                            json.dumps(["state:write", "admin"]),
+                            True,
+                            now,
+                            ADMIN_USERNAME,
+                        ),
+                    )
         conn.commit()
 
 

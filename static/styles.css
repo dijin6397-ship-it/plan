@@ -1406,12 +1406,13 @@ header h1 {
 }
 
 .gantt-container {
-    overflow-x: visible !important;
+    overflow-x: auto;
 }
 
 .gantt-scroll-container {
-    overflow-x: scroll !important;
+    overflow-x: scroll;
     width: 100%;
+    display: block;
 }
 
 .gantt-chart-wrapper {

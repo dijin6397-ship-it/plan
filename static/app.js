@@ -1296,7 +1296,7 @@ function renderGanttTree(scheduleData) {
     };
     
     // 计算图表总宽度（基于缩放级别）
-    const baseWidth = Math.max(totalDays * 100, 800);
+    const baseWidth = Math.max(totalDays * 120, 1200);
     const chartWidth = baseWidth * ganttZoomLevel;
     
     // 设置CSS变量以支持背景网格

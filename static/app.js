@@ -1500,10 +1500,14 @@ function renderGanttTree(scheduleData) {
                 </div>
             </div>
         </div>
+        <div class="gantt-bottom-scroll" id="ganttBottomScroll">
+            <div class="gantt-bottom-scroll-inner" style="width: ${chartWidth}px;"></div>
+        </div>
     `;
     tree.innerHTML = html;
     
     const scrollContainer = document.getElementById('ganttScrollContainer');
+    const bottomScroll = document.getElementById('ganttBottomScroll');
     if (scrollContainer) {
         if (ganttScrollPosition > 0) {
             scrollContainer.scrollLeft = ganttScrollPosition;
@@ -1515,6 +1519,25 @@ function renderGanttTree(scheduleData) {
                 scrollContainer.scrollLeft = Math.max(0, Math.min(maxLeft, target));
             }
             ganttAutoScrollDone = true;
+        }
+    }
+    if (scrollContainer && bottomScroll) {
+        bottomScroll.scrollLeft = scrollContainer.scrollLeft;
+        if (!scrollContainer.dataset.bottomSyncBound) {
+            let syncing = false;
+            scrollContainer.addEventListener('scroll', () => {
+                if (syncing) return;
+                syncing = true;
+                bottomScroll.scrollLeft = scrollContainer.scrollLeft;
+                syncing = false;
+            }, { passive: true });
+            bottomScroll.addEventListener('scroll', () => {
+                if (syncing) return;
+                syncing = true;
+                scrollContainer.scrollLeft = bottomScroll.scrollLeft;
+                syncing = false;
+            }, { passive: true });
+            scrollContainer.dataset.bottomSyncBound = '1';
         }
     }
 }

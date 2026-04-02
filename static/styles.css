@@ -472,7 +472,7 @@ header h1 {
 
 /* 甘特图滚动容器 */
 .gantt-scroll-container {
-    overflow-x: auto;
+    overflow-x: scroll;
     overflow-y: hidden;
     border-radius: 8px;
     background: white;

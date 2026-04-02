@@ -472,7 +472,7 @@ header h1 {
 
 /* 甘特图滚动容器 */
 .gantt-scroll-container {
-    overflow-x: scroll;
+    overflow-x: auto;
     overflow-y: hidden;
     border-radius: 8px;
     background: white;
@@ -1314,4 +1314,17 @@ header h1 {
     .gantt-toolbar {
         flex-wrap: wrap;
     }
+}
+
+.gantt-container {
+    overflow-x: visible !important;
+}
+
+.gantt-scroll-container {
+    overflow-x: scroll !important;
+    width: 100%;
+}
+
+.gantt-chart-wrapper {
+    padding-right: 140px !important;
 }

@@ -8,6 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -68,7 +69,7 @@
                         <div class="gantt-toolbar">
                             <button class="btn btn-sm" onclick="expandAllGantt()">全部展开</button>
                             <button class="btn btn-sm" onclick="collapseAllGantt()">全部收缩</button>
-                            <button id="exportGanttBtn" class="btn btn-sm btn-success" onclick="exportGanttToExcel()">导出甘特图(Excel)</button>
+                            <button id="exportGanttBtn" class="btn btn-sm btn-success" onclick="exportGanttAsImage()">导出甘特图</button>
                         </div>
                         <div class="gantt-container" id="ganttContainer">
                             <div id="ganttTree" class="gantt-tree"></div>

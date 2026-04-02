@@ -16,6 +16,7 @@ let draggedOrderInfo = null;
 let currentUser = null;
 let ganttClickBound = false;
 let ganttAutoScrollDone = false;
+let dataTreeExpandState = { phase: {}, sbop: {} };
 
 document.addEventListener('DOMContentLoaded', async function() {
     if (isHttpMode() && !location.pathname.endsWith('/login.html') && !location.pathname.endsWith('login.html')) {
@@ -717,6 +718,7 @@ function downloadTemplateAsExcel() {
     }
     
     const excelData = [];
+    const orderDetails = [];
     templateData.forEach(phase => {
         phase.sbops.forEach(sbop => {
             const row = {
@@ -736,12 +738,30 @@ function downloadTemplateAsExcel() {
             }
             
             excelData.push(row);
+
+            const orders = (sbop.orders && sbop.orders.length > 0) 
+                ? sbop.orders 
+                : generateOrdersFromCarCounts(sbop.carCounts || {}, sbop.totalHours || 0, sbop.workerCount || 1);
+            orders.forEach((o, idx) => {
+                orderDetails.push({
+                    '阶段名称': phase.name,
+                    'SBOP名称': sbop.name,
+                    '顺序': idx + 1,
+                    '工单名称': o.name,
+                    '工时(小时)': o.duration,
+                    '人数': o.workerCount
+                });
+            });
         });
     });
     
     const ws = XLSX.utils.json_to_sheet(excelData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '模板数据');
+    if (orderDetails.length > 0) {
+        const ws2 = XLSX.utils.json_to_sheet(orderDetails);
+        XLSX.utils.book_append_sheet(wb, ws2, '工单明细');
+    }
     
     const name = document.getElementById('templateName').value.trim() || '排程模板';
     XLSX.writeFile(wb, `${name}.xlsx`);
@@ -755,8 +775,8 @@ function importTemplate(input) {
     reader.onload = function(e) {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(sheet);
+        const templateSheet = workbook.Sheets['模板数据'] || workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(templateSheet);
 
         if (jsonData.length === 0) {
             alert('Excel 文件内容为空！');
@@ -765,6 +785,7 @@ function importTemplate(input) {
 
         const newTemplateData = [];
         const phasesMap = {};
+        const sbopMapByName = {};
 
         jsonData.forEach(row => {
             const phaseName = row['阶段名称'];
@@ -785,9 +806,7 @@ function importTemplate(input) {
 
             const totalHours = parseFloat(row['SBOP工时']) || 0;
             const workerCount = parseInt(row['SBOP人数']) || 1;
-            const orders = generateOrdersFromCarCounts(carCounts, totalHours, workerCount);
-
-            phasesMap[phaseName].sbops.push({
+            const sbopObj = {
                 id: Date.now() + Math.random(),
                 name: row['SBOP名称'],
                 startDayOffset: parseInt(row['SBOP天偏移']) || 1,
@@ -796,9 +815,52 @@ function importTemplate(input) {
                 workerCount: workerCount,
                 carCounts: carCounts,
                 team: row['班组'] || '',
-                orders: orders
-            });
+                orders: []
+            };
+            phasesMap[phaseName].sbops.push(sbopObj);
+            const key = `${phaseName}@@${sbopObj.name}`;
+            sbopMapByName[key] = sbopObj;
         });
+
+        // 如果存在“工单明细”sheet，则按其还原工单；否则按车号数量生成
+        const orderSheet = workbook.Sheets['工单明细'];
+        if (orderSheet) {
+            const orderRows = XLSX.utils.sheet_to_json(orderSheet);
+            const grouped = {};
+            orderRows.forEach(row => {
+                const key = `${row['阶段名称']}@@${row['SBOP名称']}`;
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push({
+                    seq: parseInt(row['顺序']) || 0,
+                    name: row['工单名称'],
+                    duration: parseFloat(row['工时(小时)']) || 0,
+                    workerCount: parseInt(row['人数']) || 0
+                });
+            });
+            Object.keys(grouped).forEach(key => {
+                const sbopObj = sbopMapByName[key];
+                if (!sbopObj) return;
+                grouped[key].sort((a, b) => (a.seq - b.seq));
+                sbopObj.orders = grouped[key].map(r => ({
+                    id: Date.now() + Math.random(),
+                    name: r.name,
+                    duration: r.duration,
+                    workerCount: r.workerCount || (sbopObj.workerCount || 1)
+                }));
+            });
+            Object.values(sbopMapByName).forEach(sbopObj => {
+                if (!sbopObj.orders || sbopObj.orders.length === 0) {
+                    sbopObj.orders = generateOrdersFromCarCounts(sbopObj.carCounts || {}, sbopObj.totalHours || 0, sbopObj.workerCount || 1);
+                }
+            });
+        } else {
+            // 无明细表时，按车号生成
+            newTemplateData.forEach(phase => {
+                phase.sbops.forEach(sbopObj => {
+                    sbopObj.orders = generateOrdersFromCarCounts(sbopObj.carCounts || {}, sbopObj.totalHours || 0, sbopObj.workerCount || 1);
+                });
+            });
+        }
 
         templateData = newTemplateData;
         document.getElementById('templateName').value = file.name.replace('.xlsx', '');
@@ -849,6 +911,34 @@ function exportGanttToExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '生产计划排程');
     XLSX.writeFile(wb, `生产计划排程_${trainNumber}_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+async function exportGanttAsImage() {
+    const container = document.getElementById('ganttScrollContainer');
+    if (!container) {
+        alert('未找到甘特图容器！');
+        return;
+    }
+    const wrapper = container.querySelector('.gantt-chart-wrapper') || container;
+    const width = Math.max(wrapper.scrollWidth || wrapper.offsetWidth, 800);
+    const height = wrapper.scrollHeight || container.offsetHeight || 600;
+    if (typeof html2canvas !== 'function') {
+        alert('缺少截图库，无法导出甘特图图像。请联系管理员。');
+        return;
+    }
+    const canvas = await html2canvas(wrapper, {
+        backgroundColor: '#ffffff',
+        width: width,
+        height: height,
+        windowWidth: width,
+        windowHeight: height,
+        scale: 2
+    });
+    const link = document.createElement('a');
+    const dateStr = new Date().toISOString().split('T')[0];
+    link.download = `甘特图_${dateStr}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
 }
 
 function saveCurrentAsTemplate() {
@@ -1167,15 +1257,25 @@ function renderGanttTree(scheduleData) {
         maxTime = minTime + 8 * 60 * 60 * 1000;
     }
     
-    // 按天对齐
-    const minDate = new Date(minTime);
-    minDate.setHours(0, 0, 0, 0);
-    const maxDate = new Date(maxTime);
-    maxDate.setHours(0, 0, 0, 0);
-    
-    const totalDays = Math.round((maxDate - minDate) / (1000 * 60 * 60 * 24)) + 1;
-    const totalHours = (maxTime - minTime) / (1000 * 60 * 60);
+    // 按周/天对齐并确保固定视窗（至少 6 周），以便底部滚动条可左右拖动查看日期
+    const rawMinDate = new Date(minTime);
+    rawMinDate.setHours(0, 0, 0, 0);
+    const rawMaxDate = new Date(maxTime);
+    rawMaxDate.setHours(0, 0, 0, 0);
     const msPerDay = 1000 * 60 * 60 * 24;
+    const minDate = new Date(rawMinDate);
+    const minIsoDow = (minDate.getDay() + 6) % 7;
+    minDate.setDate(minDate.getDate() - minIsoDow);
+    const maxDate = new Date(rawMaxDate);
+    const maxIsoDow = (maxDate.getDay() + 6) % 7;
+    maxDate.setDate(maxDate.getDate() + (6 - maxIsoDow));
+    const minTotalDays = 42;
+    let totalDays = Math.round((maxDate - minDate) / msPerDay) + 1;
+    if (totalDays < minTotalDays) {
+        totalDays = minTotalDays;
+        maxDate.setTime(minDate.getTime() + (totalDays - 1) * msPerDay);
+    }
+    const totalHours = (maxTime - minTime) / (1000 * 60 * 60);
     ganttTimeContext = { minDate: new Date(minDate), totalDays, msPerDay };
     
     const infoDiv = document.getElementById('ganttInfo');
@@ -1219,7 +1319,8 @@ function renderGanttTree(scheduleData) {
                 <div class="gantt-time-scale-row">
                     <div class="gantt-time-scale-header">时间轴</div>
                     <div class="gantt-time-scale-line-container">
-                        <div class="time-scale-line">
+                        <div class="time-scale-grid">
+                            <div class="time-scale-weeks">
     `;
     
     const today0 = new Date();
@@ -1232,26 +1333,31 @@ function renderGanttTree(scheduleData) {
     const weekStartIndex = Math.round((weekStart.getTime() - minDate.getTime()) / msPerDay);
     const weekEndIndex = weekStartIndex + 6;
 
-    // 生成时间轴 - 按天标记，从左边排起
+    const totalWeeks = Math.ceil(totalDays / 7);
+    for (let w = 0; w < totalWeeks; w++) {
+        const startI = w * 7;
+        const endI = Math.min(totalDays - 1, startI + 6);
+        const isCurrentWeek = (weekStartIndex >= startI && weekStartIndex <= endI) || (weekEndIndex >= startI && weekEndIndex <= endI) || (startI >= weekStartIndex && endI <= weekEndIndex);
+        html += `<div class="time-week-cell ${isCurrentWeek ? 'current-week' : ''}" style="flex:0 0 calc((100% / var(--total-days, 1)) * ${endI - startI + 1});">第${w + 1}周</div>`;
+    }
+    html += `</div><div class="time-scale-days">`;
+    const weekdayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
     for (let i = 0; i < totalDays; i++) {
         const dayDate = new Date(minDate);
         dayDate.setDate(dayDate.getDate() + i);
-        const dayLabel = `${dayDate.getMonth() + 1}/${dayDate.getDate()}`;
-        const isWeekMark = dayDate.getDay() === 1;
-        const markClass = isWeekMark ? 'week-mark' : 'day-mark';
-        const extraClasses = [
-            (i === todayIndex ? 'today' : ''),
-            (i >= weekStartIndex && i <= weekEndIndex ? 'current-week' : '')
-        ].filter(Boolean).join(' ');
-        const leftPercent = (i / totalDays) * 100;
-        
-        html += `
-            <div class="time-scale-tick ${markClass} ${extraClasses}" style="left: ${leftPercent}%">
-                <div class="tick-line"></div>
-                <div class="tick-label">${dayLabel}${isWeekMark ? ' (周)' : ''}</div>
-            </div>
-        `;
+        const isToday = i === todayIndex;
+        const inCurrentWeek = i >= weekStartIndex && i <= weekEndIndex;
+        html += `<div class="time-day-cell ${isToday ? 'today' : ''} ${inCurrentWeek ? 'current-week' : ''}">${dayDate.getDate()}</div>`;
     }
+    html += `</div><div class="time-scale-weekdays">`;
+    for (let i = 0; i < totalDays; i++) {
+        const dayDate = new Date(minDate);
+        dayDate.setDate(dayDate.getDate() + i);
+        const isToday = i === todayIndex;
+        const inCurrentWeek = i >= weekStartIndex && i <= weekEndIndex;
+        html += `<div class="time-weekday-cell ${isToday ? 'today' : ''} ${inCurrentWeek ? 'current-week' : ''}">${weekdayLetters[dayDate.getDay()]}</div>`;
+    }
+    html += `</div>`;
     
     html += `
                         </div>
@@ -1974,10 +2080,11 @@ function renderDataTree() {
     const canEditData = hasPermission('data:edit');
 
     templateData.forEach((phase, phaseIndex) => {
+        const phaseExpanded = dataTreeExpandState.phase[phase.id] !== false;
         html += `
             <div class="tree-item">
-                <div class="tree-header phase" onclick="toggleDataTreeRow(this)">
-                    <div class="tree-toggle expanded">−</div>
+                <div class="tree-header phase" data-type="phase" data-id="${phase.id}" onclick="toggleDataTreeRow(this)">
+                    <div class="tree-toggle ${phaseExpanded ? 'expanded' : 'collapsed'}">${phaseExpanded ? '−' : '+'}</div>
                     <span class="tree-title">${phase.name} (第${phase.startDayOffset || 1}天开始)</span>
                     <div class="tree-actions" style="${canEditData ? '' : 'display:none;'}" onclick="event.stopPropagation()">
                         <button class="btn-add" onclick="showAddSBOPModal(${phaseIndex})">添加SBOP</button>
@@ -1985,13 +2092,14 @@ function renderDataTree() {
                         <button class="btn-delete" onclick="deletePhase(${phaseIndex})">删除</button>
                     </div>
                 </div>
-                <div class="tree-children">
+                <div class="tree-children" style="display:${phaseExpanded ? 'block' : 'none'};">
         `;
         
         if (phase.sbops) {
             phase.sbops.forEach((sbop, sbopIndex) => {
                 const carCounts = sbop.carCounts || {};
                 const totalWorkOrders = sbop.orders ? sbop.orders.length : 0;
+                const sbopExpanded = dataTreeExpandState.sbop[sbop.id] !== false;
                 
                 // 生成车号展示文本 (1-8号车)
                 const carInfo = [1, 2, 3, 4, 5, 6, 7, 8]
@@ -2001,17 +2109,19 @@ function renderDataTree() {
 
                 html += `
                     <div class="tree-item">
-                        <div class="tree-header sbop" onclick="toggleDataTreeRow(this)">
-                            <div class="tree-toggle expanded">−</div>
+                        <div class="tree-header sbop" data-type="sbop" data-id="${sbop.id}" onclick="toggleDataTreeRow(this)">
+                            <div class="tree-toggle ${sbopExpanded ? 'expanded' : 'collapsed'}">${sbopExpanded ? '−' : '+'}</div>
                             <span class="tree-title">${sbop.name} (阶段第${sbop.startDayOffset || 1}天开始)</span>
                             <span class="tree-info">节拍: ${sbop.takt || 3} | 总工时: ${sbop.totalHours || 0}h | 人数: ${sbop.workerCount || 1} | 总工单: ${totalWorkOrders}${sbop.team ? ' | 班组: ' + sbop.team : ''}</span>
                             <div class="car-info-badge">${carInfo || '无车工单'}</div>
                             <div class="tree-actions" style="${canEditData ? '' : 'display:none;'}" onclick="event.stopPropagation()">
+                                <button class="btn-edit" onclick="moveSBOP(${phaseIndex}, ${sbopIndex}, -1)">上移</button>
+                                <button class="btn-edit" onclick="moveSBOP(${phaseIndex}, ${sbopIndex}, 1)">下移</button>
                                 <button class="btn-edit" onclick="showEditSBOPModal(${phaseIndex}, ${sbopIndex})">编辑SBOP</button>
                                 <button class="btn-delete" onclick="deleteSBOP(${phaseIndex}, ${sbopIndex})">删除</button>
                             </div>
                         </div>
-                        <div class="tree-children">
+                        <div class="tree-children" style="display:${sbopExpanded ? 'block' : 'none'};">
                 `;
                 
                 if (sbop.orders) {
@@ -2046,6 +2156,9 @@ function toggleDataTreeRow(header) {
     const toggle = header.querySelector('.tree-toggle');
     const item = header.closest('.tree-item');
     const children = item.querySelector('.tree-children');
+    const type = header.getAttribute('data-type');
+    const idStr = header.getAttribute('data-id');
+    const id = idStr ? idStr : null;
     
     if (children) {
         if (children.style.display === 'none') {
@@ -2053,11 +2166,15 @@ function toggleDataTreeRow(header) {
             toggle.textContent = '−';
             toggle.classList.remove('collapsed');
             toggle.classList.add('expanded');
+            if (type === 'phase' && id) dataTreeExpandState.phase[id] = true;
+            if (type === 'sbop' && id) dataTreeExpandState.sbop[id] = true;
         } else {
             children.style.display = 'none';
             toggle.textContent = '+';
             toggle.classList.remove('expanded');
             toggle.classList.add('collapsed');
+            if (type === 'phase' && id) dataTreeExpandState.phase[id] = false;
+            if (type === 'sbop' && id) dataTreeExpandState.sbop[id] = false;
         }
     }
 }
@@ -2069,6 +2186,13 @@ function expandAllDataTree() {
         t.classList.remove('collapsed');
         t.classList.add('expanded');
     });
+    document.querySelectorAll('.data-tree .tree-header[data-type][data-id]').forEach(h => {
+        const type = h.getAttribute('data-type');
+        const id = h.getAttribute('data-id');
+        if (!id) return;
+        if (type === 'phase') dataTreeExpandState.phase[id] = true;
+        if (type === 'sbop') dataTreeExpandState.sbop[id] = true;
+    });
 }
 
 function collapseAllDataTree() {
@@ -2077,6 +2201,13 @@ function collapseAllDataTree() {
         t.textContent = '+';
         t.classList.remove('expanded');
         t.classList.add('collapsed');
+    });
+    document.querySelectorAll('.data-tree .tree-header[data-type][data-id]').forEach(h => {
+        const type = h.getAttribute('data-type');
+        const id = h.getAttribute('data-id');
+        if (!id) return;
+        if (type === 'phase') dataTreeExpandState.phase[id] = false;
+        if (type === 'sbop') dataTreeExpandState.sbop[id] = false;
     });
 }
 
@@ -2322,6 +2453,17 @@ function addSBOP(phaseIndex) {
     
     renderDataTree();
     closeModal();
+}
+
+function moveSBOP(phaseIndex, sbopIndex, delta) {
+    const phase = templateData[phaseIndex];
+    if (!phase || !Array.isArray(phase.sbops)) return;
+    const newIndex = sbopIndex + delta;
+    if (newIndex < 0 || newIndex >= phase.sbops.length) return;
+    const tmp = phase.sbops[sbopIndex];
+    phase.sbops[sbopIndex] = phase.sbops[newIndex];
+    phase.sbops[newIndex] = tmp;
+    renderDataTree();
 }
 
 function updateSBOP(phaseIndex, sbopIndex) {

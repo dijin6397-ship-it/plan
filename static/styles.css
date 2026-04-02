@@ -531,6 +531,72 @@ header h1 {
     margin-right: 0;
 }
 
+.time-scale-grid {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+}
+
+.time-scale-weeks,
+.time-scale-days,
+.time-scale-weekdays {
+    display: flex;
+    width: 100%;
+}
+
+.time-week-cell {
+    height: 16px;
+    line-height: 16px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: center;
+    color: #333;
+    border-right: 1px solid #e9ecef;
+    border-bottom: 1px solid #e9ecef;
+    background: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.time-day-cell,
+.time-weekday-cell {
+    flex: 0 0 calc(100% / var(--total-days, 1));
+    height: 17px;
+    line-height: 17px;
+    font-size: 0.75rem;
+    text-align: center;
+    color: #333;
+    border-right: 1px solid #e9ecef;
+    border-bottom: 1px solid #e9ecef;
+    background: #ffffff;
+}
+
+.time-weekday-cell {
+    height: 17px;
+    line-height: 17px;
+    font-weight: 700;
+    background: #f8f9fa;
+}
+
+.time-day-cell.today,
+.time-weekday-cell.today {
+    color: #dc2626;
+    font-weight: 800;
+}
+
+.time-day-cell.current-week,
+.time-weekday-cell.current-week {
+    color: #2563eb;
+    font-weight: 700;
+}
+
+.time-week-cell.current-week {
+    color: #2563eb;
+    background: #eef2ff;
+}
+
 .time-scale-line {
     position: relative;
     height: 100%;

@@ -379,8 +379,9 @@ function addOrUpdateTrainPlan(trainNumber, templateName, startTimeStr) {
     const existing = trainPlans.find(p => p && p.number === number);
     const orderOverrides = existing && existing.orderOverrides ? existing.orderOverrides : {};
     const sbopStartOverrides = existing && existing.sbopStartOverrides ? existing.sbopStartOverrides : {};
+    const orderDayOverrides = existing && existing.orderDayOverrides ? existing.orderDayOverrides : {};
     trainPlans = trainPlans.filter(p => p && p.number !== number);
-    trainPlans.push({ number, templateName: tpl, startTime: start, orderOverrides, sbopStartOverrides });
+    trainPlans.push({ number, templateName: tpl, startTime: start, orderOverrides, sbopStartOverrides, orderDayOverrides });
     trainPlans.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
     trainPlans = trainPlans.slice(0, 50);
     saveTrainPlans();
@@ -476,7 +477,8 @@ function buildMultiTrainSchedule() {
             template,
             startDate,
             plan.orderOverrides || {},
-            plan.sbopStartOverrides || {}
+            plan.sbopStartOverrides || {},
+            plan.orderDayOverrides || {}
         );
         if (!schedule || !schedule.trains || schedule.trains.length === 0) return;
 
@@ -925,7 +927,7 @@ function generateSchedule() {
     document.querySelectorAll('.tab-btn')[0].click();
 }
 
-function calculateTaktSchedule(trainNumber, template, trainStartDate, orderOverrides = {}, sbopStartOverrides = {}) {
+function calculateTaktSchedule(trainNumber, template, trainStartDate, orderOverrides = {}, sbopStartOverrides = {}, orderDayOverrides = {}) {
     const train = {
         number: trainNumber,
         phases: []
@@ -981,6 +983,7 @@ function calculateTaktSchedule(trainNumber, template, trainStartDate, orderOverr
             }
 
             const durationDays = Math.ceil(allOrders.length / takt) || 1;
+            const sbopOrderDayMap = (orderDayOverrides && typeof orderDayOverrides === 'object') ? orderDayOverrides[overrideKey] : null;
             
             const sbop = {
                 id: sbopTemplate.id,
@@ -1000,7 +1003,12 @@ function calculateTaktSchedule(trainNumber, template, trainStartDate, orderOverr
             
             // 分配工单到每一天
             allOrders.forEach((order, index) => {
-                const dayOffset = Math.floor(index / takt);
+                let dayOffset = Math.floor(index / takt);
+                const forced = sbopOrderDayMap && typeof sbopOrderDayMap === 'object' ? sbopOrderDayMap[order.id] : null;
+                if (typeof forced === 'number' && Number.isFinite(forced)) {
+                    dayOffset = forced;
+                }
+                dayOffset = Math.max(0, Math.min(durationDays - 1, dayOffset));
                 const orderStartDate = new Date(sbopStartDate);
                 orderStartDate.setDate(orderStartDate.getDate() + dayOffset);
                 orderStartDate.setHours(8, 0, 0, 0);
@@ -1447,6 +1455,24 @@ function setTrainSbopStartOverride(trainNumber, phaseId, sbopId, startDayOffset)
     renderScheduleFromPlans();
 }
 
+function setTrainOrderDayOverride(trainNumber, phaseId, sbopId, orderId, dayOffset) {
+    const plan = trainPlans.find(p => p && p.number === trainNumber);
+    if (!plan) return;
+    if (!plan.orderDayOverrides || typeof plan.orderDayOverrides !== 'object') {
+        plan.orderDayOverrides = {};
+    }
+    const key = `${phaseId}:${sbopId}`;
+    const map = (plan.orderDayOverrides[key] && typeof plan.orderDayOverrides[key] === 'object') ? plan.orderDayOverrides[key] : {};
+    const id = (orderId || '').toString();
+    const v = parseInt(dayOffset, 10);
+    if (!id) return;
+    if (!Number.isFinite(v) || v < 0) return;
+    map[id] = v;
+    plan.orderDayOverrides[key] = map;
+    saveTrainPlans();
+    renderScheduleFromPlans();
+}
+
 function bindGanttShiftClicks() {
     if (ganttClickBound) return;
     const tree = document.getElementById('ganttTree');
@@ -1516,25 +1542,12 @@ function bindGanttShiftClicks() {
 
             const msPerDay = 1000 * 60 * 60 * 24;
             const sbopDays = Math.max(1, Math.round((day0ms(sbop.end_time) - day0ms(sbop.start_time)) / msPerDay) + 1);
-            const takt = Math.max(1, parseInt(sbop.takt, 10) || 1);
-            const currentDayOffset = Math.floor(orderIndex / takt);
-            const relativeInDay = orderIndex - (currentDayOffset * takt);
+            const currentDayOffset = Math.max(0, Math.min(sbopDays - 1, Math.round((day0ms(order.start_time) - day0ms(sbop.start_time)) / msPerDay)));
 
             showShiftModal(`调整工单：${order.name}`, sbopDays - 1, (deltaDays) => {
                 const targetDayOffset = Math.max(0, Math.min(sbopDays - 1, currentDayOffset + deltaDays));
-                const desiredIndexRaw = (targetDayOffset * takt) + relativeInDay;
-
-                const orders = sbop.orders.slice();
-                const [moved] = orders.splice(orderIndex, 1);
-                if (!moved) return;
-
-                let insertIndex = Math.max(0, Math.min(orders.length, desiredIndexRaw));
-                if (insertIndex > orderIndex) insertIndex--;
-                insertIndex = Math.max(0, Math.min(orders.length, insertIndex));
-                orders.splice(insertIndex, 0, moved);
-
                 closeModal();
-                setTrainOrderOverride(train.number, phase.id, sbop.id, orders.map(o => o.id));
+                setTrainOrderDayOverride(train.number, phase.id, sbop.id, order.id, targetDayOffset);
             });
             return;
         }

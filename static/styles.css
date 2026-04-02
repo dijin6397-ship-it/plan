@@ -425,7 +425,7 @@ header h1 {
     border-radius: 10px;
     padding: 20px;
     min-height: 500px;
-    overflow-x: auto;
+    overflow-x: hidden;
 }
 
 .gantt-tree {
@@ -500,6 +500,7 @@ header h1 {
 
 .gantt-chart-wrapper {
     min-width: 100%;
+    padding-right: 60px;
 }
 
 /* 甘特图时间刻度 */
@@ -525,8 +526,8 @@ header h1 {
     flex: 1;
     position: relative;
     height: 50px;
-    overflow: visible;
-    margin-right: 15px; /* 匹配右侧 padding */
+    overflow: hidden;
+    margin-right: 0;
 }
 
 .time-scale-line {
@@ -571,6 +572,21 @@ header h1 {
     color: #333;
 }
 
+.time-scale-tick.current-week .tick-label {
+    color: #2563eb;
+    font-weight: 700;
+}
+
+.time-scale-tick.today .tick-line {
+    background: #dc2626;
+    width: 2px;
+}
+
+.time-scale-tick.today .tick-label {
+    color: #dc2626;
+    font-weight: 800;
+}
+
 /* 甘特图容器 */
 .gantt-chart-container {
     background: white;
@@ -580,7 +596,7 @@ header h1 {
     /* 添加背景网格 */
     background-image: linear-gradient(to right, #eee 1px, transparent 1px);
     background-size: calc(100% / var(--total-days, 1)) 100%;
-    margin-right: 15px; /* 补偿 margin */
+    margin-right: 0;
 }
 
 .gantt-row {
@@ -805,9 +821,17 @@ header h1 {
 }
 
 .details-list-container {
-    overflow-x: auto;
+    overflow: auto;
     border: 1px solid #dee2e6;
     border-radius: 4px;
+    max-height: 320px;
+}
+
+.details-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: #f8f9fa;
 }
 
 .details-table {
@@ -979,9 +1003,10 @@ header h1 {
     padding: 15px 20px;
     cursor: pointer;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     transition: background 0.3s ease;
+    gap: 10px;
 }
 
 .tree-header:hover {
@@ -1032,6 +1057,7 @@ header h1 {
 .tree-actions {
     display: flex;
     gap: 5px;
+    margin-left: auto;
 }
 
 .tree-actions button {

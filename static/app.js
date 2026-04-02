@@ -14,6 +14,8 @@ let statePollTimer = null;
 let ganttDndBound = false;
 let draggedOrderInfo = null;
 let currentUser = null;
+let ganttClickBound = false;
+let ganttAutoScrollDone = false;
 
 document.addEventListener('DOMContentLoaded', async function() {
     if (isHttpMode() && !location.pathname.endsWith('/login.html') && !location.pathname.endsWith('login.html')) {
@@ -27,7 +29,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     loadTeams();
     loadTrainPlans();
     setupEventListeners();
-    bindGanttOrderDragDrop();
+    bindGanttShiftClicks();
     startStateSync();
 });
 
@@ -376,8 +378,9 @@ function addOrUpdateTrainPlan(trainNumber, templateName, startTimeStr) {
 
     const existing = trainPlans.find(p => p && p.number === number);
     const orderOverrides = existing && existing.orderOverrides ? existing.orderOverrides : {};
+    const sbopStartOverrides = existing && existing.sbopStartOverrides ? existing.sbopStartOverrides : {};
     trainPlans = trainPlans.filter(p => p && p.number !== number);
-    trainPlans.push({ number, templateName: tpl, startTime: start, orderOverrides });
+    trainPlans.push({ number, templateName: tpl, startTime: start, orderOverrides, sbopStartOverrides });
     trainPlans.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
     trainPlans = trainPlans.slice(0, 50);
     saveTrainPlans();
@@ -468,7 +471,13 @@ function buildMultiTrainSchedule() {
 
         const startDate = new Date(plan.startTime);
         startDate.setHours(8, 0, 0, 0);
-        const schedule = calculateTaktSchedule(plan.number, template, startDate, plan.orderOverrides || {});
+        const schedule = calculateTaktSchedule(
+            plan.number,
+            template,
+            startDate,
+            plan.orderOverrides || {},
+            plan.sbopStartOverrides || {}
+        );
         if (!schedule || !schedule.trains || schedule.trains.length === 0) return;
 
         const train = schedule.trains[0];
@@ -916,7 +925,7 @@ function generateSchedule() {
     document.querySelectorAll('.tab-btn')[0].click();
 }
 
-function calculateTaktSchedule(trainNumber, template, trainStartDate, orderOverrides = {}) {
+function calculateTaktSchedule(trainNumber, template, trainStartDate, orderOverrides = {}, sbopStartOverrides = {}) {
     const train = {
         number: trainNumber,
         phases: []
@@ -938,7 +947,12 @@ function calculateTaktSchedule(trainNumber, template, trainStartDate, orderOverr
         
         phaseTemplate.sbops.forEach(sbopTemplate => {
             const sbopStartDate = new Date(phaseStartDate);
-            sbopStartDate.setDate(sbopStartDate.getDate() + (sbopTemplate.startDayOffset || 1) - 1);
+            const sbopKey = `${phaseTemplate.id}:${sbopTemplate.id}`;
+            const overrideStartDayOffset = sbopStartOverrides ? sbopStartOverrides[sbopKey] : null;
+            const sbopStartDayOffset = (typeof overrideStartDayOffset === 'number' && Number.isFinite(overrideStartDayOffset))
+                ? overrideStartDayOffset
+                : (sbopTemplate.startDayOffset || 1);
+            sbopStartDate.setDate(sbopStartDate.getDate() + sbopStartDayOffset - 1);
             
             // 使用 SBOP 模板中已生成的工单列表，如果没有则尝试从 carCounts 生成（兼容旧数据）
             let allOrders = sbopTemplate.orders || [];
@@ -1200,21 +1214,33 @@ function renderGanttTree(scheduleData) {
                         <div class="time-scale-line">
     `;
     
-    // 生成时间轴 - 从第1天开始标记，确保从左边排起
-    for (let i = 0; i <= totalDays; i++) {
+    const today0 = new Date();
+    today0.setHours(0, 0, 0, 0);
+    const weekStart = new Date(today0);
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const todayIndex = Math.round((today0.getTime() - minDate.getTime()) / msPerDay);
+    const weekStartIndex = Math.round((weekStart.getTime() - minDate.getTime()) / msPerDay);
+    const weekEndIndex = weekStartIndex + 6;
+
+    // 生成时间轴 - 按天标记，从左边排起
+    for (let i = 0; i < totalDays; i++) {
         const dayDate = new Date(minDate);
         dayDate.setDate(dayDate.getDate() + i);
         const dayLabel = `${dayDate.getMonth() + 1}/${dayDate.getDate()}`;
-        const isWeekMark = i % 7 === 0;
+        const isWeekMark = dayDate.getDay() === 1;
         const markClass = isWeekMark ? 'week-mark' : 'day-mark';
-        
-        // 确保从0%开始，均匀分布
+        const extraClasses = [
+            (i === todayIndex ? 'today' : ''),
+            (i >= weekStartIndex && i <= weekEndIndex ? 'current-week' : '')
+        ].filter(Boolean).join(' ');
         const leftPercent = (i / totalDays) * 100;
         
         html += `
-            <div class="time-scale-tick ${markClass}" style="left: ${leftPercent}%">
+            <div class="time-scale-tick ${markClass} ${extraClasses}" style="left: ${leftPercent}%">
                 <div class="tick-line"></div>
-                <div class="tick-label">${dayLabel}${isWeekMark ? ' (第' + (Math.floor(i/7) + 1) + '周)' : ''}</div>
+                <div class="tick-label">${dayLabel}${isWeekMark ? ' (周)' : ''}</div>
             </div>
         `;
     }
@@ -1300,7 +1326,9 @@ function renderGanttTree(scheduleData) {
                                     </div>
                                 </div>
                                 <div class="gantt-row-bar-container">
-                                    <div class="gantt-row-bar" data-type="sbop" data-train="${trainIndex}" data-phase="${phaseIndex}" data-sbop='${JSON.stringify({id: sbop.id, team: sbop.team})}'
+                                    <div class="gantt-row-bar" data-type="sbop"
+                                         data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}"
+                                         data-train="${trainIndex}" data-phase="${phaseIndex}" data-sbop='${JSON.stringify({id: sbop.id, team: sbop.team})}'
                                          style="left: ${sbopPos.left}%; width: ${Math.max(sbopPos.width, 0.1)}%; background-color: ${colors.sbop.bg}; color: ${colors.sbop.text};">
                                         ${sbopPos.days}天
                                     </div>
@@ -1332,7 +1360,7 @@ function renderGanttTree(scheduleData) {
                                         </div>
                                         <div class="gantt-row-bar-container gantt-order-dropzone"
                                              data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}">
-                                            <div class="gantt-row-bar gantt-order-bar" data-type="order" draggable="${canEditPlan ? 'true' : 'false'}"
+                                            <div class="gantt-row-bar gantt-order-bar" data-type="order" draggable="false"
                                                  data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}" data-order-index="${orderIndex}"
                                                  style="left: ${orderPos.left}%; width: ${Math.max(orderPos.width, 0.1)}%; background-color: ${colors.order.bg}; color: ${colors.order.text};">
                                                 ${orderPos.days}天 (${order.duration}小时/${order.workerCount}人)
@@ -1361,10 +1389,19 @@ function renderGanttTree(scheduleData) {
     `;
     tree.innerHTML = html;
     
-    // 恢复滚动位置
     const scrollContainer = document.getElementById('ganttScrollContainer');
-    if (scrollContainer && ganttScrollPosition > 0) {
-        scrollContainer.scrollLeft = ganttScrollPosition;
+    if (scrollContainer) {
+        if (ganttScrollPosition > 0) {
+            scrollContainer.scrollLeft = ganttScrollPosition;
+        } else if (!ganttAutoScrollDone) {
+            const baseIndex = (weekStartIndex >= 0 && weekStartIndex < totalDays) ? weekStartIndex : todayIndex;
+            if (typeof baseIndex === 'number' && baseIndex >= 0 && baseIndex < totalDays) {
+                const target = Math.max(0, Math.floor((baseIndex / totalDays) * chartWidth) - 350);
+                const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+                scrollContainer.scrollLeft = Math.max(0, Math.min(maxLeft, target));
+            }
+            ganttAutoScrollDone = true;
+        }
     }
 }
 
@@ -1394,6 +1431,140 @@ function setTrainOrderOverride(trainNumber, phaseId, sbopId, orderIds) {
     plan.orderOverrides[key] = orderIds;
     saveTrainPlans();
     renderScheduleFromPlans();
+}
+
+function setTrainSbopStartOverride(trainNumber, phaseId, sbopId, startDayOffset) {
+    const plan = trainPlans.find(p => p && p.number === trainNumber);
+    if (!plan) return;
+    if (!plan.sbopStartOverrides || typeof plan.sbopStartOverrides !== 'object') {
+        plan.sbopStartOverrides = {};
+    }
+    const v = parseInt(startDayOffset, 10);
+    if (!Number.isFinite(v) || v < 1) return;
+    const key = `${phaseId}:${sbopId}`;
+    plan.sbopStartOverrides[key] = v;
+    saveTrainPlans();
+    renderScheduleFromPlans();
+}
+
+function bindGanttShiftClicks() {
+    if (ganttClickBound) return;
+    const tree = document.getElementById('ganttTree');
+    if (!tree) return;
+    ganttClickBound = true;
+
+    const day0ms = (d) => {
+        const x = new Date(d);
+        x.setHours(0, 0, 0, 0);
+        return x.getTime();
+    };
+
+    const showShiftModal = (title, maxDays, onApply) => {
+        const max = Math.max(1, parseInt(maxDays, 10) || 1);
+        document.getElementById('modalTitle').textContent = title;
+        document.getElementById('modalBody').innerHTML = `
+            <div class="form-group">
+                <label>调整方向：</label>
+                <div style="display:flex; gap:12px; margin-top:6px;">
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        <input type="radio" name="shiftDir" value="prev" checked> 前移
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        <input type="radio" name="shiftDir" value="next"> 后置
+                    </label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>天数（1-${max}）：</label>
+                <input type="number" id="shiftDaysInput" min="1" max="${max}" value="1">
+            </div>
+            <div class="button-group">
+                <button id="shiftApplyBtn" class="btn btn-primary">确定</button>
+                <button id="shiftCancelBtn" class="btn">取消</button>
+            </div>
+        `;
+        openModal();
+        const cancelBtn = document.getElementById('shiftCancelBtn');
+        if (cancelBtn) cancelBtn.onclick = closeModal;
+        const applyBtn = document.getElementById('shiftApplyBtn');
+        if (applyBtn) {
+            applyBtn.onclick = () => {
+                const dir = document.querySelector('input[name="shiftDir"]:checked')?.value || 'prev';
+                const days = parseInt(document.getElementById('shiftDaysInput')?.value || '0', 10);
+                if (!Number.isFinite(days) || days <= 0) return;
+                const delta = (dir === 'prev') ? -days : days;
+                onApply(delta);
+            };
+        }
+    };
+
+    tree.addEventListener('click', (e) => {
+        const orderBar = e.target.closest && e.target.closest('.gantt-order-bar[data-type="order"]');
+        if (orderBar) {
+            if (!hasPermission('plan:edit')) return;
+            const trainIndex = parseInt(orderBar.dataset.trainIndex, 10);
+            const phaseIndex = parseInt(orderBar.dataset.phaseIndex, 10);
+            const sbopIndex = parseInt(orderBar.dataset.sbopIndex, 10);
+            const orderIndex = parseInt(orderBar.dataset.orderIndex, 10);
+            if ([trainIndex, phaseIndex, sbopIndex, orderIndex].some(n => Number.isNaN(n))) return;
+            const scheduleData = currentScheduleData;
+            const train = scheduleData && scheduleData.trains && scheduleData.trains[trainIndex];
+            const phase = train && train.phases && train.phases[phaseIndex];
+            const sbop = phase && phase.sbops && phase.sbops[sbopIndex];
+            const order = sbop && sbop.orders && sbop.orders[orderIndex];
+            if (!sbop || !order) return;
+
+            const msPerDay = 1000 * 60 * 60 * 24;
+            const sbopDays = Math.max(1, Math.round((day0ms(sbop.end_time) - day0ms(sbop.start_time)) / msPerDay) + 1);
+            const takt = Math.max(1, parseInt(sbop.takt, 10) || 1);
+            const currentDayOffset = Math.floor(orderIndex / takt);
+            const relativeInDay = orderIndex - (currentDayOffset * takt);
+
+            showShiftModal(`调整工单：${order.name}`, sbopDays - 1, (deltaDays) => {
+                const targetDayOffset = Math.max(0, Math.min(sbopDays - 1, currentDayOffset + deltaDays));
+                const desiredIndexRaw = (targetDayOffset * takt) + relativeInDay;
+
+                const orders = sbop.orders.slice();
+                const [moved] = orders.splice(orderIndex, 1);
+                if (!moved) return;
+
+                let insertIndex = Math.max(0, Math.min(orders.length, desiredIndexRaw));
+                if (insertIndex > orderIndex) insertIndex--;
+                insertIndex = Math.max(0, Math.min(orders.length, insertIndex));
+                orders.splice(insertIndex, 0, moved);
+
+                closeModal();
+                setTrainOrderOverride(train.number, phase.id, sbop.id, orders.map(o => o.id));
+            });
+            return;
+        }
+
+        const sbopBar = e.target.closest && e.target.closest('.gantt-row-bar[data-type="sbop"]');
+        if (sbopBar) {
+            if (!hasPermission('plan:edit')) return;
+            const trainIndex = parseInt(sbopBar.dataset.trainIndex, 10);
+            const phaseIndex = parseInt(sbopBar.dataset.phaseIndex, 10);
+            const sbopIndex = parseInt(sbopBar.dataset.sbopIndex, 10);
+            if ([trainIndex, phaseIndex, sbopIndex].some(n => Number.isNaN(n))) return;
+            const scheduleData = currentScheduleData;
+            const train = scheduleData && scheduleData.trains && scheduleData.trains[trainIndex];
+            const phase = train && train.phases && train.phases[phaseIndex];
+            const sbop = phase && phase.sbops && phase.sbops[sbopIndex];
+            if (!phase || !sbop) return;
+
+            const msPerDay = 1000 * 60 * 60 * 24;
+            const phaseDays = Math.max(1, Math.round((day0ms(phase.end_time) - day0ms(phase.start_time)) / msPerDay) + 1);
+            const sbopDays = Math.max(1, Math.round((day0ms(sbop.end_time) - day0ms(sbop.start_time)) / msPerDay) + 1);
+            const maxStartOffset = Math.max(0, phaseDays - sbopDays);
+            const currentStartOffset = Math.max(0, Math.min(maxStartOffset, Math.round((day0ms(sbop.start_time) - day0ms(phase.start_time)) / msPerDay)));
+
+            showShiftModal(`调整SBOP：${sbop.name}`, phaseDays - 1, (deltaDays) => {
+                const targetOffset = Math.max(0, Math.min(maxStartOffset, currentStartOffset + deltaDays));
+                closeModal();
+                setTrainSbopStartOverride(train.number, phase.id, sbop.id, targetOffset + 1);
+            });
+        }
+    });
 }
 
 function clearDragClasses(tree) {

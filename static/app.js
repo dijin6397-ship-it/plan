@@ -920,6 +920,38 @@ async function exportGanttAsImage() {
         return;
     }
     const wrapper = container.querySelector('.gantt-chart-wrapper') || container;
+    const bottomScroll = document.getElementById('ganttBottomScroll');
+    const prevScrollLeft = container.scrollLeft;
+    const prevBottomScrollLeft = bottomScroll ? bottomScroll.scrollLeft : 0;
+    const prevScrollTop = container.scrollTop;
+
+    const toggleStates = [];
+    document.querySelectorAll('.gantt-children-container').forEach(el => {
+        toggleStates.push({
+            el,
+            display: el.style.display,
+            maxHeight: el.style.maxHeight,
+            classCollapsed: el.classList.contains('collapsed')
+        });
+    });
+    const toggles = [];
+    document.querySelectorAll('.gantt-toggle').forEach(el => {
+        toggles.push({
+            el,
+            text: el.textContent,
+            classExpanded: el.classList.contains('expanded'),
+            classCollapsed: el.classList.contains('collapsed'),
+            visibility: el.style.visibility
+        });
+    });
+
+    if (typeof expandAllGantt === 'function') {
+        expandAllGantt();
+    }
+    container.scrollLeft = 0;
+    container.scrollTop = 0;
+    if (bottomScroll) bottomScroll.scrollLeft = 0;
+
     const width = Math.max(wrapper.scrollWidth || wrapper.offsetWidth, 800);
     const height = wrapper.scrollHeight || container.offsetHeight || 600;
     if (typeof html2canvas !== 'function') {
@@ -939,6 +971,38 @@ async function exportGanttAsImage() {
     link.download = `甘特图_${dateStr}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
+
+    toggleStates.forEach(s => {
+        if (!s.el) return;
+        if (s.display === undefined || s.display === null || s.display === '') {
+            s.el.style.removeProperty('display');
+        } else {
+            s.el.style.display = s.display;
+        }
+        if (s.maxHeight === undefined || s.maxHeight === null || s.maxHeight === '') {
+            s.el.style.removeProperty('max-height');
+        } else {
+            s.el.style.maxHeight = s.maxHeight;
+        }
+        if (s.classCollapsed) s.el.classList.add('collapsed');
+        else s.el.classList.remove('collapsed');
+    });
+    toggles.forEach(s => {
+        if (!s.el) return;
+        s.el.textContent = s.text;
+        if (s.classExpanded) s.el.classList.add('expanded');
+        else s.el.classList.remove('expanded');
+        if (s.classCollapsed) s.el.classList.add('collapsed');
+        else s.el.classList.remove('collapsed');
+        if (s.visibility === undefined || s.visibility === null || s.visibility === '') {
+            s.el.style.removeProperty('visibility');
+        } else {
+            s.el.style.visibility = s.visibility;
+        }
+    });
+    container.scrollLeft = prevScrollLeft;
+    container.scrollTop = prevScrollTop;
+    if (bottomScroll) bottomScroll.scrollLeft = prevBottomScrollLeft;
 }
 
 function saveCurrentAsTemplate() {
@@ -1223,15 +1287,39 @@ function renderGanttTree(scheduleData) {
     // 更新班组筛选下拉框
     updateTeamFilter(scheduleData);
     
-    // 计算实际开始时间（最早的任务开始时间）
+    // 计算实际时间范围（必须覆盖：列车/阶段/SBOP 的起止时间，即使该 SBOP 没有工单）
     let minTime = Infinity;
     let maxTime = -Infinity;
-    
+
     scheduleData.trains.forEach(train => {
+        if (train.start_time) {
+            const t = new Date(train.start_time).getTime();
+            if (t < minTime) minTime = t;
+        }
+        if (train.end_time) {
+            const t = new Date(train.end_time).getTime();
+            if (t > maxTime) maxTime = t;
+        }
         if (train.phases) {
             train.phases.forEach(phase => {
+                if (phase.start_time) {
+                    const t = new Date(phase.start_time).getTime();
+                    if (t < minTime) minTime = t;
+                }
+                if (phase.end_time) {
+                    const t = new Date(phase.end_time).getTime();
+                    if (t > maxTime) maxTime = t;
+                }
                 if (phase.sbops) {
                     phase.sbops.forEach(sbop => {
+                        if (sbop.start_time) {
+                            const t = new Date(sbop.start_time).getTime();
+                            if (t < minTime) minTime = t;
+                        }
+                        if (sbop.end_time) {
+                            const t = new Date(sbop.end_time).getTime();
+                            if (t > maxTime) maxTime = t;
+                        }
                         if (sbop.orders) {
                             sbop.orders.forEach(order => {
                                 const startTime = order.start_time.getTime();
@@ -1245,6 +1333,15 @@ function renderGanttTree(scheduleData) {
             });
         }
     });
+
+    if (scheduleData.totalStartTime) {
+        const t = new Date(scheduleData.totalStartTime).getTime();
+        if (t < minTime) minTime = t;
+    }
+    if (scheduleData.totalEndTime) {
+        const t = new Date(scheduleData.totalEndTime).getTime();
+        if (t > maxTime) maxTime = t;
+    }
     
     if (minTime === Infinity) {
         const startTimeStr = document.getElementById('startTime').value;

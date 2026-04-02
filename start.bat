@@ -6,16 +6,28 @@ echo ========================================
 echo.
 
 echo 正在检查Python环境...
+set "PY_CMD="
 where python >nul 2>&1
-if %errorlevel% neq 0 (
+if %errorlevel% equ 0 (
+    set "PY_CMD=python"
+) else (
+    where py >nul 2>&1
+    if %errorlevel% equ 0 (
+        set "PY_CMD=py -3"
+    )
+)
+
+if "%PY_CMD%"=="" (
     echo [错误] 未找到Python，请先安装Python 3.8+
     echo 下载地址: https://www.python.org/downloads/
+    echo 安装时请勾选: Add python.exe to PATH
     pause
     exit /b 1
 )
 
 echo 正在安装依赖...
-pip install flask flask-cors pandas openpyxl python-dateutil -q
+%PY_CMD% -m pip install --upgrade pip -q
+%PY_CMD% -m pip install -r requirements.txt -q
 
 echo.
 echo 正在启动服务器...
@@ -24,6 +36,6 @@ echo 按 Ctrl+C 停止服务器
 echo.
 echo ========================================
 
-python app.py
+%PY_CMD% app.py
 
 pause

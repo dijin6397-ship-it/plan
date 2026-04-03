@@ -425,7 +425,7 @@ header h1 {
     border-radius: 10px;
     padding: 20px;
     min-height: 500px;
-    overflow-x: visible;
+    overflow-x: auto;
 }
 
 .gantt-tree {
@@ -484,10 +484,11 @@ header h1 {
 .gantt-bottom-scroll {
     overflow-x: auto;
     overflow-y: hidden;
-    height: 14px;
+    height: 18px;
     margin-top: 8px;
     background: #f8f9fa;
     border-radius: 6px;
+    border: 1px solid #dee2e6;
 }
 .gantt-bottom-scroll::-webkit-scrollbar {
     height: 12px;
@@ -502,6 +503,18 @@ header h1 {
 }
 .gantt-bottom-scroll-inner {
     height: 1px;
+}
+
+.gantt-bottom-slider {
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+}
+
+.gantt-bottom-slider input[type="range"] {
+    width: 100%;
 }
 
 .gantt-scroll-container::-webkit-scrollbar {

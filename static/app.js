@@ -1615,11 +1615,15 @@ function renderGanttTree(scheduleData) {
         <div class="gantt-bottom-scroll" id="ganttBottomScroll">
             <div class="gantt-bottom-scroll-inner" style="width: ${chartWidth}px;"></div>
         </div>
+        <div class="gantt-bottom-slider" id="ganttBottomSliderWrap">
+            <input type="range" id="ganttBottomSlider" min="0" max="0" value="0" step="1">
+        </div>
     `;
     tree.innerHTML = html;
     
     const scrollContainer = document.getElementById('ganttScrollContainer');
     const bottomScroll = document.getElementById('ganttBottomScroll');
+    const bottomSlider = document.getElementById('ganttBottomSlider');
     if (scrollContainer) {
         if (ganttScrollPosition > 0) {
             scrollContainer.scrollLeft = ganttScrollPosition;
@@ -1633,22 +1637,53 @@ function renderGanttTree(scheduleData) {
             ganttAutoScrollDone = true;
         }
     }
-    if (scrollContainer && bottomScroll) {
-        bottomScroll.scrollLeft = scrollContainer.scrollLeft;
+    if (scrollContainer) {
+        const syncSliderBounds = () => {
+            if (!bottomSlider) return;
+            const max = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+            bottomSlider.max = String(max);
+            bottomSlider.value = String(Math.max(0, Math.min(max, scrollContainer.scrollLeft)));
+            bottomSlider.disabled = max <= 0;
+        };
+
+        requestAnimationFrame(syncSliderBounds);
+
         if (!scrollContainer.dataset.bottomSyncBound) {
             let syncing = false;
-            scrollContainer.addEventListener('scroll', () => {
+
+            const syncFromScrollContainer = () => {
                 if (syncing) return;
                 syncing = true;
-                bottomScroll.scrollLeft = scrollContainer.scrollLeft;
+                if (bottomScroll) bottomScroll.scrollLeft = scrollContainer.scrollLeft;
+                if (bottomSlider) bottomSlider.value = String(scrollContainer.scrollLeft);
                 syncing = false;
-            }, { passive: true });
-            bottomScroll.addEventListener('scroll', () => {
+            };
+
+            const syncFromBottomScroll = () => {
                 if (syncing) return;
                 syncing = true;
                 scrollContainer.scrollLeft = bottomScroll.scrollLeft;
+                if (bottomSlider) bottomSlider.value = String(bottomScroll.scrollLeft);
                 syncing = false;
+            };
+
+            const syncFromBottomSlider = () => {
+                if (syncing) return;
+                syncing = true;
+                const v = parseInt(bottomSlider.value || '0', 10) || 0;
+                scrollContainer.scrollLeft = v;
+                if (bottomScroll) bottomScroll.scrollLeft = v;
+                syncing = false;
+            };
+
+            scrollContainer.addEventListener('scroll', syncFromScrollContainer, { passive: true });
+            if (bottomScroll) bottomScroll.addEventListener('scroll', syncFromBottomScroll, { passive: true });
+            if (bottomSlider) bottomSlider.addEventListener('input', syncFromBottomSlider, { passive: true });
+
+            window.addEventListener('resize', () => {
+                requestAnimationFrame(syncSliderBounds);
             }, { passive: true });
+
             scrollContainer.dataset.bottomSyncBound = '1';
         }
     }

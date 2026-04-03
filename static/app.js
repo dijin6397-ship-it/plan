@@ -655,6 +655,11 @@ function setupEventListeners() {
             } else {
                 sidebar.style.display = 'block';
             }
+
+            if (tabId === 'gantt') {
+                setTimeout(refreshGanttHorizontalControls, 0);
+                setTimeout(refreshGanttHorizontalControls, 200);
+            }
         });
     });
     
@@ -1284,6 +1289,33 @@ let ganttZoomLevel = 1;
 let ganttScrollPosition = 0;
 let ganttTimeContext = null;
 
+function refreshGanttHorizontalControls() {
+    const scrollContainer = document.getElementById('ganttScrollContainer');
+    if (!scrollContainer) return;
+    const wrapper = scrollContainer.querySelector('.gantt-chart-wrapper');
+    const bottomScroll = document.getElementById('ganttBottomScroll');
+    const bottomScrollInner = bottomScroll ? bottomScroll.querySelector('.gantt-bottom-scroll-inner') : null;
+    const bottomSlider = document.getElementById('ganttBottomSlider');
+
+    const hint = parseFloat(scrollContainer.dataset.contentWidth || '0') || 0;
+    const wrapperWidth = wrapper ? Math.max(wrapper.scrollWidth || 0, wrapper.offsetWidth || 0) : 0;
+    const contentWidth = Math.max(hint, wrapperWidth);
+    const viewWidth = scrollContainer.clientWidth || Math.round(scrollContainer.getBoundingClientRect().width) || 0;
+    const max = Math.max(0, Math.round(contentWidth - viewWidth));
+
+    if (bottomScrollInner && contentWidth > 0) {
+        bottomScrollInner.style.width = `${Math.ceil(contentWidth)}px`;
+    }
+    if (bottomScroll) {
+        bottomScroll.scrollLeft = scrollContainer.scrollLeft;
+    }
+    if (bottomSlider) {
+        bottomSlider.max = String(max);
+        bottomSlider.value = String(Math.max(0, Math.min(max, scrollContainer.scrollLeft)));
+        bottomSlider.disabled = max <= 0;
+    }
+}
+
 function renderGanttTree(scheduleData) {
     const tree = document.getElementById('ganttTree');
     
@@ -1409,7 +1441,11 @@ function renderGanttTree(scheduleData) {
     // 关键修复1：确保每个日期格子最小有足够宽度(例如40px)，总宽度随天数线性增长，打破原本1200px的限制
     const minDayWidth = 40; 
     const baseWidth = Math.max(totalDays * minDayWidth, 1200);
-    const chartWidth = baseWidth * ganttZoomLevel;
+    const viewportWidth = tree ? Math.round(tree.getBoundingClientRect().width) : 0;
+    let chartWidth = baseWidth * ganttZoomLevel;
+    if (totalDays > 30 && viewportWidth > 0) {
+        chartWidth = Math.max(chartWidth, viewportWidth + 200);
+    }
     
     // 设置CSS变量以支持背景网格
     tree.style.setProperty('--total-days', totalDays);
@@ -1638,15 +1674,10 @@ function renderGanttTree(scheduleData) {
         }
     }
     if (scrollContainer) {
-        const syncSliderBounds = () => {
-            if (!bottomSlider) return;
-            const max = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
-            bottomSlider.max = String(max);
-            bottomSlider.value = String(Math.max(0, Math.min(max, scrollContainer.scrollLeft)));
-            bottomSlider.disabled = max <= 0;
-        };
-
-        requestAnimationFrame(syncSliderBounds);
+        scrollContainer.dataset.contentWidth = String(chartWidth);
+        requestAnimationFrame(refreshGanttHorizontalControls);
+        setTimeout(refreshGanttHorizontalControls, 50);
+        setTimeout(refreshGanttHorizontalControls, 250);
 
         if (!scrollContainer.dataset.bottomSyncBound) {
             let syncing = false;
@@ -1681,7 +1712,8 @@ function renderGanttTree(scheduleData) {
             if (bottomSlider) bottomSlider.addEventListener('input', syncFromBottomSlider, { passive: true });
 
             window.addEventListener('resize', () => {
-                requestAnimationFrame(syncSliderBounds);
+                requestAnimationFrame(refreshGanttHorizontalControls);
+                setTimeout(refreshGanttHorizontalControls, 50);
             }, { passive: true });
 
             scrollContainer.dataset.bottomSyncBound = '1';

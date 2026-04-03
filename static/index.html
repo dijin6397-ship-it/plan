@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>生产计划自动排程系统</title>
-    <link rel="stylesheet" href="styles.css?v=20260402b">
+    <link rel="stylesheet" href="styles.css?v=20260403c">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -28,32 +28,6 @@
         </header>
 
         <div class="main-content">
-            <div class="sidebar">
-                <div class="control-panel">
-                    <h3>排程设置</h3>
-                    <div class="form-group">
-                        <label for="trainNumberInput">1) 添加列车号:</label>
-                        <input type="text" id="trainNumberInput" placeholder="请输入列车号, 如 2101">
-                    </div>
-                    <div class="form-group">
-                        <label for="templateSelect">2) 选择数据模板:</label>
-                        <select id="templateSelect">
-                            <option value="">-- 请选择模板 --</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="startTime">3) 开始作业时间:</label>
-                        <input type="date" id="startTime">
-                    </div>
-                    <button id="scheduleBtn" class="btn btn-primary">添加/更新到排程</button>
-                    <button id="clearScheduleBtn" class="btn btn-danger">清空所有列车排程</button>
-                    <div class="train-plan-panel">
-                        <h4>已添加列车</h4>
-                        <div id="trainPlanList" class="train-plan-list"></div>
-                    </div>
-                </div>
-            </div>
-
             <div class="content-area">
                 <div class="tabs">
                     <button class="tab-btn active" data-tab="gantt">生产计划排程</button>
@@ -61,6 +35,31 @@
                 </div>
 
                 <div id="ganttTab" class="tab-content active">
+                    <div class="gantt-settings-panel">
+                        <div class="control-panel">
+                            <h3>排程设置</h3>
+                            <div class="form-group">
+                                <label for="trainNumberInput">1) 添加列车号:</label>
+                                <input type="text" id="trainNumberInput" placeholder="请输入列车号, 如 2101">
+                            </div>
+                            <div class="form-group">
+                                <label for="templateSelect">2) 选择数据模板:</label>
+                                <select id="templateSelect">
+                                    <option value="">-- 请选择模板 --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="startTime">3) 开始作业时间:</label>
+                                <input type="date" id="startTime">
+                            </div>
+                            <button id="scheduleBtn" class="btn btn-primary">添加/更新到排程</button>
+                            <button id="clearScheduleBtn" class="btn btn-danger">清空所有列车排程</button>
+                            <div class="train-plan-panel">
+                                <h4>已添加列车</h4>
+                                <div id="trainPlanList" class="train-plan-list"></div>
+                            </div>
+                        </div>
+                    </div>
                     <div id="ganttTopSection">
                         <div class="gantt-header">
                             <h3>生产计划排程甘特图</h3>
@@ -182,6 +181,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260402b"></script>
+    <script src="app.js?v=20260403c"></script>
 </body>
 </html>

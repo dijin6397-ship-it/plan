@@ -67,8 +67,7 @@ header h1 {
 }
 
 .main-content {
-    display: flex;
-    gap: 20px;
+    display: block;
     background: white;
     border-radius: 15px;
     box-shadow: 0 10px 40px rgba(0,0,0,0.2);
@@ -80,6 +79,16 @@ header h1 {
     background: #f8f9fa;
     padding: 20px;
     border-right: 1px solid #e9ecef;
+}
+
+.gantt-settings-panel {
+    padding: 20px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.gantt-settings-panel .control-panel {
+    margin-bottom: 0;
 }
 
 .control-panel {

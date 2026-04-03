@@ -1407,14 +1407,18 @@ header h1 {
 
 .gantt-container {
     overflow-x: auto;
+    width: 100%;
 }
 
 .gantt-scroll-container {
-    overflow-x: scroll;
+    overflow-x: auto; /* 修改为 auto，避免强制 scroll 导致双滚动条冲突 */
     width: 100%;
     display: block;
+    position: relative; /* 确保内部定位正确 */
 }
 
 .gantt-chart-wrapper {
-    padding-right: 140px !important;
+    min-width: 100%; /* 确保能被撑开 */
+    padding-right: 140px; /* 移除 !important，避免过度强制 */
+    box-sizing: border-box;
 }

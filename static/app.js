@@ -958,14 +958,27 @@ async function exportGanttAsImage() {
         alert('缺少截图库，无法导出甘特图图像。请联系管理员。');
         return;
     }
+    
+    // 关键修复：临时将容器设置为能包含全部内容的样式，避免 html2canvas 裁剪
+    const originalWrapperWidth = wrapper.style.width;
+    const originalContainerOverflow = container.style.overflow;
+    container.style.overflow = 'visible'; // 确保没有隐藏滚动区域
+    wrapper.style.width = width + 'px';
+
     const canvas = await html2canvas(wrapper, {
         backgroundColor: '#ffffff',
         width: width,
         height: height,
         windowWidth: width,
         windowHeight: height,
-        scale: 2
+        scale: 2,
+        useCORS: true // 允许跨域图片（如果有的话）
     });
+    
+    // 恢复原有样式
+    container.style.overflow = originalContainerOverflow;
+    wrapper.style.width = originalWrapperWidth;
+
     const link = document.createElement('a');
     const dateStr = new Date().toISOString().split('T')[0];
     link.download = `甘特图_${dateStr}.png`;
@@ -1393,7 +1406,9 @@ function renderGanttTree(scheduleData) {
     };
     
     // 计算图表总宽度（基于缩放级别）
-    const baseWidth = Math.max(totalDays * 120, 1200);
+    // 关键修复1：确保每个日期格子最小有足够宽度(例如40px)，总宽度随天数线性增长，打破原本1200px的限制
+    const minDayWidth = 40; 
+    const baseWidth = Math.max(totalDays * minDayWidth, 1200);
     const chartWidth = baseWidth * ganttZoomLevel;
     
     // 设置CSS变量以支持背景网格
@@ -1411,13 +1426,13 @@ function renderGanttTree(scheduleData) {
             <button class="btn btn-sm" onclick="zoomGantt(1.25)">放大</button>
             <button class="btn btn-sm" onclick="resetGanttZoom()">重置</button>
         </div>
-        <div class="gantt-scroll-container" id="ganttScrollContainer">
-            <div class="gantt-chart-wrapper" style="width: ${chartWidth}px;">
-                <div class="gantt-time-scale-row">
-                    <div class="gantt-time-scale-header">时间轴</div>
-                    <div class="gantt-time-scale-line-container">
-                        <div class="time-scale-grid">
-                            <div class="time-scale-weeks">
+        <div class="gantt-scroll-container" id="ganttScrollContainer" style="overflow-x: auto; width: 100%;">
+            <div class="gantt-chart-wrapper" style="width: ${chartWidth}px; min-width: 100%;">
+                <div class="gantt-time-scale-row" style="display: flex; width: 100%;">
+                    <div class="gantt-time-scale-header" style="flex-shrink: 0; width: 350px;">时间轴</div>
+                    <div class="gantt-time-scale-line-container" style="flex-grow: 1; width: calc(100% - 350px);">
+                        <div class="time-scale-grid" style="display: flex; flex-direction: column; width: 100%;">
+                            <div class="time-scale-weeks" style="display: flex; width: 100%;">
     `;
     
     const today0 = new Date();
@@ -1437,22 +1452,22 @@ function renderGanttTree(scheduleData) {
         const isCurrentWeek = (weekStartIndex >= startI && weekStartIndex <= endI) || (weekEndIndex >= startI && weekEndIndex <= endI) || (startI >= weekStartIndex && endI <= weekEndIndex);
         html += `<div class="time-week-cell ${isCurrentWeek ? 'current-week' : ''}" style="flex:0 0 calc((100% / var(--total-days, 1)) * ${endI - startI + 1});">第${w + 1}周</div>`;
     }
-    html += `</div><div class="time-scale-days">`;
+    html += `</div><div class="time-scale-days" style="display: flex; width: 100%;">`;
     const weekdayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
     for (let i = 0; i < totalDays; i++) {
         const dayDate = new Date(minDate);
         dayDate.setDate(dayDate.getDate() + i);
         const isToday = i === todayIndex;
         const inCurrentWeek = i >= weekStartIndex && i <= weekEndIndex;
-        html += `<div class="time-day-cell ${isToday ? 'today' : ''} ${inCurrentWeek ? 'current-week' : ''}">${dayDate.getDate()}</div>`;
+        html += `<div class="time-day-cell ${isToday ? 'today' : ''} ${inCurrentWeek ? 'current-week' : ''}" style="flex:0 0 calc(100% / ${totalDays});">${dayDate.getDate()}</div>`;
     }
-    html += `</div><div class="time-scale-weekdays">`;
+    html += `</div><div class="time-scale-weekdays" style="display: flex; width: 100%;">`;
     for (let i = 0; i < totalDays; i++) {
         const dayDate = new Date(minDate);
         dayDate.setDate(dayDate.getDate() + i);
         const isToday = i === todayIndex;
         const inCurrentWeek = i >= weekStartIndex && i <= weekEndIndex;
-        html += `<div class="time-weekday-cell ${isToday ? 'today' : ''} ${inCurrentWeek ? 'current-week' : ''}">${weekdayLetters[dayDate.getDay()]}</div>`;
+        html += `<div class="time-weekday-cell ${isToday ? 'today' : ''} ${inCurrentWeek ? 'current-week' : ''}" style="flex:0 0 calc(100% / ${totalDays});">${weekdayLetters[dayDate.getDay()]}</div>`;
     }
     html += `</div>`;
     
@@ -1460,7 +1475,7 @@ function renderGanttTree(scheduleData) {
                         </div>
                     </div>
                 </div>
-                <div class="gantt-chart-container">
+                <div class="gantt-chart-container" style="width: 100%; position: relative;">
     `;
     
     scheduleData.trains.forEach((train, trainIndex) => {

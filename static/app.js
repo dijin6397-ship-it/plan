@@ -383,7 +383,7 @@ function addOrUpdateTrainPlan(trainNumber, templateName, startTimeStr) {
     const orderDayOverrides = existing && existing.orderDayOverrides ? existing.orderDayOverrides : {};
     trainPlans = trainPlans.filter(p => p && p.number !== number);
     trainPlans.push({ number, templateName: tpl, startTime: start, orderOverrides, sbopStartOverrides, orderDayOverrides });
-    trainPlans.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    trainPlans.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
     trainPlans = trainPlans.slice(0, 50);
     saveTrainPlans();
 }
@@ -492,11 +492,14 @@ function buildMultiTrainSchedule() {
         if (!globalEnd || end > globalEnd) globalEnd = end;
     });
 
-    if (trains.length === 0) {
-        return null;
-    }
+  if (trains.length === 0) {
+    return null;
+  }
 
-    const totalDuration = globalStart && globalEnd ? (globalEnd - globalStart) / (1000 * 60 * 60) : 0;
+  // 按开始时间降序排列：越晚开始的排在越前面
+  trains.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
+
+  const totalDuration = globalStart && globalEnd ? (globalEnd - globalStart) / (1000 * 60 * 60) : 0;
     return {
         trains,
         totalStartTime: globalStart,
@@ -971,24 +974,34 @@ async function exportGanttAsImage() {
     wrapper.style.width = width + 'px';
 
     const canvas = await html2canvas(wrapper, {
-        backgroundColor: '#ffffff',
-        width: width,
-        height: height,
-        windowWidth: width,
-        windowHeight: height,
-        scale: 2,
-        useCORS: true // 允许跨域图片（如果有的话）
+      backgroundColor: '#ffffff',
+      width: width,
+      height: height,
+      windowWidth: width,
+      windowHeight: height,
+      scale: 2,
+      useCORS: true // 允许跨域图片（如果有的话）
     });
-    
+
     // 恢复原有样式
     container.style.overflow = originalContainerOverflow;
     wrapper.style.width = originalWrapperWidth;
 
+    // 使用 Blob 方式下载更可靠
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) {
+      alert('生成图片失败，请重试。');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     const dateStr = new Date().toISOString().split('T')[0];
     link.download = `甘特图_${dateStr}.png`;
-    link.href = canvas.toDataURL('image/png');
+    link.href = url;
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 
     toggleStates.forEach(s => {
         if (!s.el) return;
@@ -2094,56 +2107,60 @@ function searchDetails() {
         if (selectedTrain && selectedTrain !== 'all' && train.number !== selectedTrain) {
             return;
         }
-        train.phases.forEach(phase => {
-            phase.sbops.forEach(sbop => {
-                // 班组筛选
-                const teamMatch = selectedTeam === 'all' || sbop.team === selectedTeam;
-                
-                // 时间跨度筛选
-                let dateMatch = true;
-                const sbopStartStr = formatDate(sbop.start_time);
-                const sbopEndStr = formatDate(sbop.end_time);
-                
-                if (filterStartDate) {
-                    dateMatch = dateMatch && (sbopEndStr >= filterStartDate);
-                }
-                if (filterEndDate) {
-                    dateMatch = dateMatch && (sbopStartStr <= filterEndDate);
-                }
-                
-                if (teamMatch && dateMatch) {
-                    sbop.orders.forEach(order => {
-                        const rowData = {
-                            trainNumber: train.number,
-                            phaseName: phase.name,
-                            sbopName: sbop.name,
-                            team: sbop.team || '-',
-                            orderName: order.name,
-                            startDate: formatDate(order.start_time),
-                            endDate: formatDate(order.end_time),
-                            duration: order.duration,
-                            workerCount: order.workerCount
-                        };
-                        
-                        lastSearchResults.push(rowData);
-                        
-                        const tr = document.createElement('tr');
-                        tr.innerHTML = `
-                            <td>${rowData.trainNumber}</td>
-                            <td>${rowData.phaseName}</td>
-                            <td>${rowData.sbopName}</td>
-                            <td>${rowData.team}</td>
-                            <td>${rowData.orderName}</td>
-                            <td>${rowData.startDate}</td>
-                            <td>${rowData.endDate}</td>
-                            <td>${rowData.duration}</td>
-                            <td>${rowData.workerCount}</td>
-                        `;
-                        tableBody.appendChild(tr);
-                    });
-                }
-            });
+      train.phases.forEach(phase => {
+        phase.sbops.forEach(sbop => {
+          // 班组筛选
+          const teamMatch = selectedTeam === 'all' || sbop.team === selectedTeam;
+          if (!teamMatch) return;
+
+          // 遍历工单，对每个工单进行时间筛选
+          sbop.orders.forEach(order => {
+            const orderStartStr = formatDate(order.start_time);
+            const orderEndStr = formatDate(order.end_time);
+
+            // 严格的时间筛选：工单必须在筛选时间段内
+            let dateMatch = true;
+            if (filterStartDate) {
+              // 工单结束时间必须在筛选开始日期之后（有交集）
+              dateMatch = dateMatch && (orderEndStr >= filterStartDate);
+            }
+            if (filterEndDate) {
+              // 工单开始时间必须在筛选结束日期之前（有交集）
+              dateMatch = dateMatch && (orderStartStr <= filterEndDate);
+            }
+
+            if (dateMatch) {
+              const rowData = {
+                trainNumber: train.number,
+                phaseName: phase.name,
+                sbopName: sbop.name,
+                team: sbop.team || '-',
+                orderName: order.name,
+                startDate: orderStartStr,
+                endDate: orderEndStr,
+                duration: order.duration,
+                workerCount: order.workerCount
+              };
+
+              lastSearchResults.push(rowData);
+
+              const tr = document.createElement('tr');
+              tr.innerHTML = `
+                <td>${rowData.trainNumber}</td>
+                <td>${rowData.phaseName}</td>
+                <td>${rowData.sbopName}</td>
+                <td>${rowData.team}</td>
+                <td>${rowData.orderName}</td>
+                <td>${rowData.startDate}</td>
+                <td>${rowData.endDate}</td>
+                <td>${rowData.duration}</td>
+                <td>${rowData.workerCount}</td>
+              `;
+              tableBody.appendChild(tr);
+            }
+          });
         });
+      });
     });
     
     if (lastSearchResults.length === 0) {

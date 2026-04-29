@@ -27,7 +27,7 @@ DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "state.json"
 _state_lock = Lock()
 _auth_lock = Lock()
-POSTGRES_URL = os.environ.get("POSTGRES_URL")
+POSTGRES_URL = os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL")
 KV_REST_API_URL = os.environ.get("KV_REST_API_URL")
 
 KV_REST_API_TOKEN = os.environ.get("KV_REST_API_TOKEN")

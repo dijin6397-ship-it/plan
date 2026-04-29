@@ -1,0 +1,1686 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+header {
+    text-align: center;
+    color: white;
+    margin-bottom: 30px;
+}
+
+.header-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.user-info {
+    font-size: 0.95rem;
+    opacity: 0.95;
+}
+
+.logo {
+    width: 737px;
+    height: 170px;
+    border-radius: 10px;
+    object-fit: contain;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+.header-text {
+    text-align: center;
+}
+
+header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+}
+
+.subtitle {
+    font-size: 1.1rem;
+    opacity: 0.9;
+}
+
+.main-content {
+    display: block;
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    overflow: hidden;
+}
+
+.sidebar {
+    width: 280px;
+    background: #f8f9fa;
+    padding: 20px;
+    border-right: 1px solid #e9ecef;
+}
+
+.gantt-settings-panel {
+    padding: 20px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.gantt-settings-panel .control-panel {
+    margin-bottom: 0;
+}
+
+.control-panel {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.train-plan-panel {
+    margin-top: 15px;
+    background: #ffffff;
+    padding: 12px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.train-plan-panel h4 {
+    color: #333;
+    margin-bottom: 10px;
+    font-size: 0.95rem;
+    border-bottom: 2px solid #667eea;
+    padding-bottom: 8px;
+}
+
+.train-plan-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.train-plan-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    padding: 8px 10px;
+    border-radius: 8px;
+}
+
+.train-plan-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.train-plan-title {
+    font-weight: 700;
+    color: #333;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.train-plan-subtitle {
+    color: #666;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.train-plan-remove {
+    border: none;
+    background: transparent;
+    color: #dc3545;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 2px 6px;
+    line-height: 1;
+}
+
+.control-panel h3 {
+    color: #333;
+    margin-bottom: 15px;
+    font-size: 1.1rem;
+    border-bottom: 2px solid #667eea;
+    padding-bottom: 10px;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    color: #555;
+    font-size: 0.9rem;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 0.9rem;
+}
+
+.form-group select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 0.9rem;
+    background: white;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 5px rgba(102, 126, 234, 0.3);
+}
+
+.btn {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    margin-bottom: 10px;
+}
+
+.btn:last-child {
+    margin-bottom: 0;
+}
+
+.btn-sm {
+    padding: 8px 16px;
+    width: auto;
+    font-size: 0.85rem;
+    margin-bottom: 0;
+    margin-right: 10px;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
+}
+
+.btn-success {
+    background: #28a745;
+    color: white;
+}
+
+.btn-success:hover {
+    background: #218838;
+}
+
+.btn-danger {
+    background: #dc3545;
+    color: white;
+}
+
+.btn.disabled,
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.auth-page {
+    max-width: 520px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    overflow: hidden;
+}
+
+.auth-body {
+    padding: 24px;
+}
+
+.captcha-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.captcha-box {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 54px;
+    flex: 1;
+}
+
+.admin-page {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    padding: 20px;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th,
+.table td {
+    border-bottom: 1px solid #e9ecef;
+    padding: 10px;
+    text-align: left;
+    font-size: 0.9rem;
+}
+
+.table th {
+    background: #f8f9fa;
+}
+
+.btn-danger:hover {
+    background: #c82333;
+}
+
+.btn-link {
+    background: transparent;
+    color: #667eea;
+    text-decoration: underline;
+    padding: 5px;
+}
+
+.btn-link:hover {
+    color: #764ba2;
+}
+
+.content-area {
+    flex: 1;
+    padding: 20px;
+}
+
+.tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #e9ecef;
+    padding-bottom: 10px;
+}
+
+.tab-btn {
+    padding: 10px 25px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 1rem;
+    color: #666;
+    border-radius: 5px;
+    transition: all 0.3s ease;
+}
+
+.tab-btn:hover {
+    background: #f8f9fa;
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.gantt-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.gantt-header h3 {
+    color: #333;
+}
+
+.gantt-info {
+    background: #f8f9fa;
+    padding: 10px 20px;
+    border-radius: 5px;
+    font-size: 0.9rem;
+    color: #555;
+}
+
+.gantt-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    padding: 10px 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.view-label {
+    margin-left: 20px;
+    color: #555;
+    font-size: 0.9rem;
+}
+
+#ganttViewLevel {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 0.9rem;
+}
+
+.gantt-container {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 20px;
+    min-height: 500px;
+    overflow-x: auto;
+}
+
+.gantt-tree {
+    min-height: 400px;
+}
+
+.gantt-time-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px 20px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.gantt-time-header .time-info {
+    font-size: 0.95rem;
+}
+
+.gantt-time-header .time-info strong {
+    font-weight: 600;
+}
+
+/* 甘特图缩放控制 */
+.gantt-zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    padding: 10px 15px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.gantt-zoom-controls .zoom-level {
+    font-weight: 600;
+    color: #333;
+    min-width: 50px;
+    text-align: center;
+}
+
+/* 甘特图冻结窗格容器 - 核心结构：左右分栏，左固定右滚动 */
+.gantt-scroll-container {
+  overflow: hidden;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  max-width: 100%;
+  position: relative;
+}
+
+/* 冻结窗格内部表格布局 */
+.gantt-freeze-table {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: max-content;
+}
+
+/* 每一行（表头行 + 数据行）都采用左右分栏 */
+.gantt-freeze-row {
+  display: flex;
+  width: 100%;
+  min-width: max-content;
+}
+
+/* ===== 左侧冻结列（结构数据）===== */
+.gantt-freeze-left {
+  width: 350px;
+  min-width: 350px;
+  flex-shrink: 0;
+  position: sticky;
+  left: 0;
+  z-index: 20;
+  background: white;
+  border-right: 2px solid #e9ecef;
+}
+
+/* 右侧时间轴滚动区域 */
+.gantt-freeze-right {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* 时间轴行的左侧标题单元格 */
+.gantt-time-scale-header {
+  font-weight: 600;
+  color: #333;
+  padding: 15px 15px;
+  font-size: 0.9rem;
+  background: white;
+  z-index: 25;
+  border-right: 2px solid #e9ecef;
+  line-height: 50px;
+  height: 50px;
+  box-sizing: border-box;
+}
+
+.gantt-bottom-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    height: 18px;
+    margin-top: 8px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border: 1px solid #dee2e6;
+}
+.gantt-bottom-scroll::-webkit-scrollbar {
+    height: 12px;
+}
+.gantt-bottom-scroll::-webkit-scrollbar-track {
+    background: #f1f3f5;
+    border-radius: 6px;
+}
+.gantt-bottom-scroll::-webkit-scrollbar-thumb {
+    background: #adb5bd;
+    border-radius: 6px;
+}
+.gantt-bottom-scroll-inner {
+    height: 1px;
+}
+
+.gantt-bottom-slider {
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+}
+
+.gantt-bottom-slider input[type="range"] {
+    width: 100%;
+}
+
+.gantt-scroll-container::-webkit-scrollbar {
+    height: 12px;
+}
+
+.gantt-scroll-container::-webkit-scrollbar-track {
+    background: #f1f3f5;
+    border-radius: 6px;
+}
+
+.gantt-scroll-container::-webkit-scrollbar-thumb {
+    background: #adb5bd;
+    border-radius: 6px;
+}
+
+.gantt-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: #868e96;
+}
+
+.gantt-chart-wrapper {
+    min-width: 100%;
+    padding-right: 140px;
+}
+
+/* 甘特图时间刻度 - 冻结窗格模式 */
+.gantt-time-scale-row {
+  display: flex;
+  align-items: stretch;
+  background: white;
+  border-bottom: 2px solid #e9ecef;
+}
+
+.gantt-time-scale-line-container {
+  flex: 1;
+  position: relative;
+  min-height: 50px;
+  overflow: hidden;
+}
+
+.time-scale-grid {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+}
+
+.time-scale-weeks,
+.time-scale-days,
+.time-scale-weekdays {
+    display: flex;
+    width: 100%;
+}
+
+.time-week-cell {
+    height: 16px;
+    line-height: 16px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: center;
+    color: #333;
+    border-right: 1px solid #e9ecef;
+    border-bottom: 1px solid #e9ecef;
+    background: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.time-day-cell,
+.time-weekday-cell {
+    flex: 0 0 calc(100% / var(--total-days, 1));
+    height: 17px;
+    line-height: 17px;
+    font-size: 0.75rem;
+    text-align: center;
+    color: #333;
+    border-right: 1px solid #e9ecef;
+    border-bottom: 1px solid #e9ecef;
+    background: #ffffff;
+}
+
+.time-weekday-cell {
+    height: 17px;
+    line-height: 17px;
+    font-weight: 700;
+    background: #f8f9fa;
+}
+
+.time-day-cell.today,
+.time-weekday-cell.today {
+    color: #dc2626;
+    font-weight: 800;
+}
+
+.time-day-cell.current-week,
+.time-weekday-cell.current-week {
+    color: #2563eb;
+    font-weight: 700;
+}
+
+.time-week-cell.current-week {
+    color: #2563eb;
+    background: #eef2ff;
+}
+
+.time-scale-line {
+    position: relative;
+    height: 100%;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.time-scale-tick {
+    position: absolute;
+    bottom: 0;
+    transform: translateX(0); /* 修改为 0，因为 tick-line 是 2px 宽，从左边缘对齐更准确 */
+}
+
+.time-scale-tick .tick-line {
+    width: 1px; /* 修改为 1px */
+    background: #adb5bd;
+    margin: 0;
+}
+
+.time-scale-tick.day-mark .tick-line {
+    height: 10px;
+}
+
+.time-scale-tick.week-mark .tick-line {
+    height: 20px;
+    background: #495057;
+    width: 2px; /* 稍微加粗 */
+}
+
+.time-scale-tick .tick-label {
+    font-size: 0.75rem;
+    color: #666;
+    text-align: left; /* 修改为 left */
+    margin-top: 5px;
+    white-space: nowrap;
+    padding-left: 5px;
+}
+
+.time-scale-tick.week-mark .tick-label {
+    font-weight: 600;
+    color: #333;
+}
+
+.time-scale-tick.current-week .tick-label {
+    color: #2563eb;
+    font-weight: 700;
+}
+
+.time-scale-tick.today .tick-line {
+    background: #dc2626;
+    width: 2px;
+}
+
+.time-scale-tick.today .tick-label {
+    color: #dc2626;
+    font-weight: 800;
+}
+
+/* 甘特图容器 - 冻结窗格模式 */
+.gantt-chart-container {
+  background: white;
+  position: relative;
+  /* 支持背景网格 */
+  background-image: linear-gradient(to right, #eee 1px, transparent 1px);
+  overflow: visible;
+}
+
+.gantt-row {
+  display: flex;
+  align-items: stretch;
+  margin-bottom: 0;
+  border-radius: 0;
+  overflow: hidden;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.gantt-row-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  border-radius: 0;
+  position: static; /* 冻结窗格中不需要sticky，由父容器控制 */
+  background: inherit;
+  z-index: auto;
+}
+
+.gantt-row-header:hover {
+  background: #f8f9fa;
+}
+
+/* 不同层级固定列的背景色 */
+.gantt-level-1 .gantt-row-header {
+  background: #e3f2fd;
+}
+
+.gantt-level-2 .gantt-row-header {
+  background: #e8f4fd;
+}
+
+.gantt-level-3 .gantt-row-header {
+  background: #f3e8d8;
+}
+
+.gantt-level-4 .gantt-row-header {
+  background: #f3f0ff;
+}
+
+.gantt-level-1 .gantt-row-header:hover,
+.gantt-level-2 .gantt-row-header:hover,
+.gantt-level-3 .gantt-row-header:hover,
+.gantt-level-4 .gantt-row-header:hover {
+  background: #f8f9fa;
+}
+
+.gantt-toggle {
+    cursor: pointer;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    margin-right: 10px;
+    user-select: none;
+    color: #666;
+    transition: color 0.2s, transform 0.2s;
+    flex-shrink: 0;
+}
+
+.gantt-toggle:hover {
+    color: #495057;
+}
+
+.gantt-toggle.expanded {
+    color: #dc3545;
+}
+
+.gantt-toggle.collapsed {
+    color: #667eea;
+}
+
+.gantt-row-info {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow: hidden;
+}
+
+.row-number {
+    font-size: 0.85rem;
+    color: #6c757d;
+    min-width: 50px;
+    font-family: monospace;
+}
+
+.row-name {
+    font-weight: 600;
+    color: #333;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.row-duration {
+    font-size: 0.8rem;
+    color: #6c757d;
+    background: #f8f9fa;
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.gantt-row-bar-container {
+  flex: 1;
+  min-height: 36px;
+  background: #f8f9fa;
+  position: relative;
+  margin-left: 0;
+  overflow: hidden;
+  /* 确保宽度由父容器决定 */
+  width: 100%;
+}
+
+.gantt-row-bar {
+    height: 28px;
+    border-radius: 4px;
+    position: absolute;
+    top: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    cursor: grab;
+    user-select: none;
+}
+
+.gantt-row-bar:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    transform: translateY(-1px);
+}
+
+.gantt-row-bar:active {
+    cursor: grabbing;
+}
+
+.gantt-row-bar.dragging {
+    opacity: 0.8;
+    cursor: grabbing;
+    z-index: 100;
+}
+
+/* 层级样式 */
+.gantt-level-1 .gantt-row-header {
+    background: #e3f2fd;
+}
+
+.gantt-level-1 .row-name {
+    color: #1565c0;
+    font-size: 1rem;
+}
+
+.gantt-level-2 .gantt-row-header {
+    background: #e8f5e9;
+    padding-left: 25px;
+}
+
+.gantt-level-2 .row-name {
+    color: #2e7d32;
+}
+
+.gantt-level-3 .gantt-row-header {
+    background: #fff3e0;
+    padding-left: 40px;
+}
+
+.gantt-level-3 .row-name {
+    color: #ef6c00;
+}
+
+.gantt-level-4 .gantt-row-header {
+    background: #fce4ec;
+    padding-left: 55px;
+}
+
+.gantt-level-4 .row-name {
+    color: #c2185b;
+    font-size: 0.9rem;
+}
+
+.gantt-level-4 .row-duration {
+    font-size: 0.75rem;
+}
+
+.gantt-order-row {
+    cursor: move;
+}
+
+.gantt-order-row.dragging {
+    opacity: 0.6;
+}
+
+.gantt-order-row.drag-over {
+    outline: 2px dashed #667eea;
+    outline-offset: -2px;
+}
+
+/* 子容器 */
+.gantt-children-container {
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+.gantt-children-container.collapsed {
+    max-height: 0 !important;
+}
+
+/* 明细清单查询区域 */
+.search-details-section {
+    margin-top: 30px;
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.section-header h3 {
+    margin: 0;
+    color: #333;
+}
+
+.search-toolbar-bottom {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.details-list-container {
+    overflow: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    max-height: 320px;
+}
+
+.details-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: #f8f9fa;
+}
+
+.details-table {
+    width: 100%;
+    min-width: 980px;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.details-table th, .details-table td {
+    padding: 12px 15px;
+    border: 1px solid #dee2e6;
+    text-align: left;
+}
+
+.details-table th {
+    background-color: #f8f9fa;
+    color: #495057;
+    font-weight: 600;
+}
+
+.details-table tr:hover {
+    background-color: #f1f3f5;
+}
+
+.empty-text {
+    text-align: center;
+    color: #6c757d;
+    padding: 30px !important;
+}
+
+/* 旧样式兼容 */
+.gantt-node {
+    margin-bottom: 10px;
+}
+
+.gantt-node-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 15px;
+    background: white;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.gantt-node-header:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.gantt-node-content {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.gantt-node-name {
+    font-weight: 600;
+    color: #333;
+}
+
+.gantt-node-info {
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.gantt-bar-container {
+    flex: 1;
+    margin-left: 20px;
+    height: 30px;
+    background: #e9ecef;
+    border-radius: 15px;
+    position: relative;
+    overflow: hidden;
+}
+
+.gantt-bar {
+    height: 100%;
+    border-radius: 15px;
+    position: absolute;
+    left: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.gantt-children {
+    padding-left: 36px;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+.gantt-children.collapsed {
+    max-height: 0 !important;
+}
+
+.gantt-level-1 .gantt-node-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.gantt-level-1 .gantt-node-name {
+    color: white;
+}
+
+.gantt-level-1 .gantt-node-info {
+    color: rgba(255,255,255,0.9);
+}
+
+.gantt-level-2 .gantt-node-header {
+    background: #e3f2fd;
+    border-left: 4px solid #1976d2;
+}
+
+.gantt-level-3 .gantt-node-header {
+    background: #f3e5f5;
+    border-left: 4px solid #7b1fa2;
+}
+
+.gantt-level-4 .gantt-node-header {
+    background: #e8f5e9;
+    border-left: 4px solid #388e3c;
+}
+
+.data-panel-inline {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.data-panel-inline h3 {
+    color: #333;
+    margin-bottom: 15px;
+    font-size: 1.1rem;
+    border-bottom: 2px solid #667eea;
+    padding-bottom: 10px;
+}
+
+.data-panel-inline .form-group {
+    margin-bottom: 15px;
+}
+
+.data-panel-inline .btn {
+    width: auto;
+    display: inline-block;
+    margin-right: 10px;
+    margin-bottom: 0;
+}
+
+.data-tree {
+    padding: 20px;
+}
+
+.tree-item {
+    background: white;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    overflow: hidden;
+}
+
+.tree-header {
+    padding: 15px 20px;
+    cursor: pointer;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    transition: background 0.3s ease;
+    gap: 10px;
+}
+
+.tree-header:hover {
+    background: #f8f9fa;
+}
+
+.tree-header.train {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.tree-header.train:hover {
+    background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+}
+
+.tree-header.phase {
+    background: #e3f2fd;
+    color: #1976d2;
+    border-left: 4px solid #1976d2;
+}
+
+.tree-header.sbop {
+    background: #f3e5f5;
+    color: #7b1fa2;
+    border-left: 4px solid #7b1fa2;
+}
+
+.tree-header.order {
+    background: #e8f5e9;
+    color: #388e3c;
+    border-left: 4px solid #388e3c;
+}
+
+.tree-title {
+    font-weight: 600;
+}
+
+.tree-info {
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+
+.tree-children {
+    padding-left: 20px;
+    border-top: 1px solid #e9ecef;
+}
+
+.tree-actions {
+    display: flex;
+    gap: 5px;
+    margin-left: auto;
+}
+
+.tree-actions button {
+    padding: 5px 10px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s ease;
+}
+
+.btn-edit {
+    background: #ffc107;
+    color: #333;
+}
+
+.btn-delete {
+    background: #dc3545;
+    color: white;
+}
+
+.btn-add {
+    background: #28a745;
+    color: white;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.5);
+}
+
+.modal-content {
+    background-color: white;
+    margin: 5% auto;
+    padding: 30px;
+    border-radius: 15px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    color: #333;
+}
+
+#modalTitle {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+#modalBody .form-group {
+    margin-bottom: 20px;
+}
+
+#modalBody .btn {
+    margin-top: 10px;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #999;
+}
+
+.empty-state h3 {
+    margin-bottom: 10px;
+    color: #666;
+}
+
+.phase-color-1 { background: #667eea !important; }
+.phase-color-2 { background: #f093fb !important; }
+.phase-color-3 { background: #4facfe !important; }
+.phase-color-4 { background: #43e97b !important; }
+.phase-color-5 { background: #fa709a !important; }
+.phase-color-6 { background: #fee140 !important; }
+.phase-color-7 { background: #30cfd0 !important; }
+.phase-color-8 { background: #a8edea !important; }
+
+/* 弹窗中的各车工单数量网格 */
+.car-counts-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #dee2e6;
+}
+
+.car-count-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.car-count-item label {
+    font-size: 0.8rem;
+    margin-bottom: 2px;
+}
+
+.car-count-input {
+    width: 100%;
+    padding: 4px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+}
+
+/* 班组管理样式 */
+.team-management {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.team-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.team-tag {
+    background: #667eea;
+    color: white;
+    padding: 5px 12px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+}
+
+.team-tag button {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.team-tag button:hover {
+    color: #ff4d4f;
+}
+
+/* 树形结构折叠指示器 */
+.tree-toggle {
+    cursor: pointer;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    margin-right: 10px;
+    user-select: none;
+    color: #666;
+    transition: transform 0.2s;
+}
+
+.tree-toggle.collapsed {
+    color: #667eea;
+}
+
+.tree-header {
+    display: flex;
+    align-items: center;
+}
+
+.button-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.car-info-badge {
+    background: #e9ecef;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #495057;
+    margin-left: 10px;
+    display: inline-block;
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 响应式调整 */
+@media (max-width: 1200px) {
+    .main-content {
+        flex-direction: column;
+    }
+    
+    .sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid #e9ecef;
+    }
+    
+    .header-content {
+        flex-direction: column;
+    }
+    
+    .header-text {
+        text-align: center;
+    }
+}
+
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 1.8rem;
+    }
+    
+    .gantt-header {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .gantt-node-content {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .gantt-bar-container {
+        margin-left: 0;
+        margin-top: 10px;
+        width: 100%;
+    }
+    
+    .gantt-toolbar {
+        flex-wrap: wrap;
+    }
+}
+
+/* 甘特图容器 */
+.gantt-container {
+  overflow: hidden;
+  width: 100%;
+}
+
+/* 单一滚动容器（Excel冻结窗格核心：一个容器做所有滚动，sticky实现冻结）*/
+.gantt-scroll-container {
+  overflow: auto;
+  width: 100%;
+  display: block;
+  position: relative;
+  max-height: 70vh;
+}
+
+/* 内容包裹层：固定宽度 = 左侧冻结列(350px) + 右侧时间轴(totalDays*40px) */
+.gantt-chart-wrapper {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* ========== 冻结窗格专用样式（Excel-like Freeze Panes）========= */
+
+/* 冻结窗格 - 时间轴表头行（垂直滚动时固定顶部）*/
+.gantt-freeze-header-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 2px solid #dee2e6;
+  position: sticky;
+  top: 0;
+  z-index: 25;
+}
+
+/* 冻结窗格 - 左侧标题单元格 */
+.gantt-freeze-header-cell {
+  width: 350px;
+  min-width: 350px;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 700;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 15px;
+  position: sticky;
+  left: 0;
+  z-index: 30;
+  border-right: 2px solid rgba(255,255,255,0.3);
+}
+
+/* 冻结窗格 - 右侧时间轴区域（不再独立滚动，由外层容器统一滚动）*/
+.gantt-freeze-time-area {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: white;
+}
+
+/* 冻结窗格 - 数据行 */
+.gantt-freeze-data-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid #f0f0f0;
+  min-width: max-content;
+}
+
+/* 冻结窗格 - 数据行左侧单元格 */
+.gantt-freeze-data-cell {
+  width: 350px;
+  min-width: 350px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: inherit;
+  position: sticky;
+  left: 0;
+  z-index: 15;
+  border-right: 2px solid #e9ecef;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.gantt-freeze-data-cell:hover {
+  background: #f8f9fa !important;
+}
+
+/* 各层级左侧冻结列样式（参照结构化数据管理页面 tree-header 风格）*/
+/* Level 1 - 列车号：蓝色左边框 + 浅蓝背景 */
+.gantt-level-1 > .gantt-freeze-data-cell {
+    background: #e3f2fd;
+    color: #1976d2;
+    border-left: 4px solid #1976d2;
+    padding-left: 10px;
+}
+.gantt-level-1 > .gantt-freeze-data-cell .row-name {
+    color: #1976d2;
+    font-weight: 700;
+}
+
+/* Level 2 - 阶段：绿色左边框 + 浅绿背景 + 缩进 */
+.gantt-level-2 > .gantt-freeze-data-cell {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border-left: 4px solid #2e7d32;
+    padding-left: 24px;
+}
+.gantt-level-2 > .gantt-freeze-data-cell .row-name {
+    color: #2e7d32;
+}
+
+/* Level 3 - SBOP：橙色左边框 + 浅橙背景 + 更多缩进 */
+.gantt-level-3 > .gantt-freeze-data-cell {
+    background: #fff3e0;
+    color: #ef6c00;
+    border-left: 4px solid #ef6c00;
+    padding-left: 38px;
+}
+.gantt-level-3 > .gantt-freeze-data-cell .row-name {
+    color: #ef6c00;
+}
+
+/* Level 4 - 工单：粉红色左边框 + 浅粉背景 + 最深缩进 */
+.gantt-level-4 > .gantt-freeze-data-cell {
+    background: #fce4ec;
+    color: #c2185b;
+    border-left: 4px solid #c2185b;
+    padding-left: 52px;
+}
+.gantt-level-4 > .gantt-freeze-data-cell .row-name {
+    color: #c2185b;
+    font-size: 0.85rem;
+}
+
+.gantt-level-1 > .gantt-freeze-data-cell:hover,
+.gantt-level-2 > .gantt-freeze-data-cell:hover,
+.gantt-level-3 > .gantt-freeze-data-cell:hover,
+.gantt-level-4 > .gantt-freeze-data-cell:hover {
+  background: #f8f9fa !important;
+}
+
+/* 冻结窗格 - 数据行右侧时间条区域（不再独立滚动，由外层容器统一滚动）*/
+.gantt-freeze-bar-cell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  background: #f8f9fa;
+  position: relative;
+  /* 背景网格线 */
+  background-image: linear-gradient(to right, #eee 1px, transparent 1px);
+  background-size: calc(100% / var(--total-days, 1)) 100%;
+}
+
+/* 子容器在冻结模式下的样式 */
+.gantt-children-container {
+  overflow: visible;
+  transition: none;
+}
+
+.gantt-children-container.collapsed {
+  display: none !important;
+}
+
+/* 同步滚动条样式 */
+.gantt-sync-scrollbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 18px;
+  margin-top: 6px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+.gantt-sync-scrollbar::-webkit-scrollbar {
+  height: 12px;
+}
+.gantt-sync-scrollbar::-webkit-scrollbar-track {
+  background: #f1f3f5;
+  border-radius: 6px;
+}
+.gantt-sync-scrollbar::-webkit-scrollbar-thumb {
+  background: #adb5bd;
+  border-radius: 6px;
+}
+.gantt-sync-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #868e96;
+}
+
+/* 导出按钮组样式 */
+.export-btn-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

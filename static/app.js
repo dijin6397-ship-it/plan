@@ -1,0 +1,3084 @@
+let templateData = []; // 当前正在编辑的模板数据（阶段-SBOP-工单）
+let templates = {}; // 已保存的模板集合 {名称: 数据}
+let teamDictionary = []; // 班组数据字典
+let trainPlans = [];
+let currentScheduleData = null;
+let ganttChart = null;
+let currentViewLevel = 'sbop';
+let serverStateRevision = null;
+let stateDirty = false;
+let statePullInFlight = false;
+let statePushInFlight = false;
+let statePushTimer = null;
+let statePollTimer = null;
+let ganttDndBound = false;
+let draggedOrderInfo = null;
+let currentUser = null;
+let ganttClickBound = false;
+let ganttAutoScrollDone = false;
+let dataTreeExpandState = { phase: {}, sbop: {} };
+
+document.addEventListener('DOMContentLoaded', async function() {
+    if (isHttpMode() && !location.pathname.endsWith('/login.html') && !location.pathname.endsWith('login.html')) {
+        const ok = await ensureAuthenticated();
+        if (!ok) return;
+    } else {
+        applyPermissions();
+    }
+    initializeDateTimeInput();
+    loadTemplates();
+    loadTeams();
+    loadTrainPlans();
+    setupEventListeners();
+    bindGanttShiftClicks();
+    startStateSync();
+});
+
+function isHttpMode() {
+    return location.protocol === 'http:' || location.protocol === 'https:';
+}
+
+function hasPermission(perm) {
+    if (!isHttpMode()) return true;
+    if (!currentUser) return false;
+    if (currentUser.role === 'admin') return true;
+    const perms = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    if (perms.includes('admin')) return true;
+    if (perms.includes('state:write')) return true; // legacy support
+    return perms.includes(perm);
+}
+
+function canWriteState() {
+    // For general state writing (like pushing state to server), we allow if they have any edit permission
+    if (!isHttpMode()) return true;
+    if (!currentUser) return false;
+    if (currentUser.role === 'admin') return true;
+    const perms = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    return perms.includes('state:write') || perms.includes('data:edit') || perms.includes('schedule:edit') || perms.includes('plan:edit');
+}
+
+async function ensureAuthenticated() {
+    try {
+        const res = await fetch('/api/me', { cache: 'no-store' });
+        if (res.status === 401) {
+            location.href = '/login.html';
+            return false;
+        }
+        if (!res.ok) {
+            currentUser = null;
+            updateUserBar();
+            applyPermissions();
+            return true;
+        }
+        currentUser = await res.json();
+        updateUserBar();
+        applyPermissions();
+        return true;
+    } catch (e) {
+        currentUser = null;
+        updateUserBar();
+        applyPermissions();
+        return true;
+    }
+}
+
+function updateUserBar() {
+    const el = document.getElementById('userInfo');
+    const actionsContainer = document.querySelector('.header-actions') || (el ? el.parentElement : null);
+    let btn = document.getElementById('logoutBtn');
+    let adminLink = document.getElementById('adminLink');
+    if (el) {
+        if (currentUser && currentUser.username) {
+            el.textContent = `当前账号：${currentUser.username}`;
+        } else {
+            el.textContent = '';
+        }
+    }
+    if (!btn && actionsContainer) {
+        btn = document.createElement('button');
+        btn.id = 'logoutBtn';
+        btn.className = 'btn btn-sm';
+        btn.type = 'button';
+        btn.textContent = '退出登录';
+        btn.style.display = 'none';
+        actionsContainer.appendChild(btn);
+    }
+    if (btn) {
+        btn.style.display = currentUser ? 'inline-flex' : 'none';
+    }
+    if (!adminLink && actionsContainer) {
+        adminLink = document.createElement('a');
+        adminLink.id = 'adminLink';
+        adminLink.className = 'btn btn-sm btn-secondary';
+        adminLink.href = 'admin.html';
+        adminLink.textContent = '账号及权限';
+        adminLink.style.display = 'none';
+        if (btn && btn.parentElement === actionsContainer) {
+            actionsContainer.insertBefore(adminLink, btn);
+        } else {
+            actionsContainer.appendChild(adminLink);
+        }
+    }
+    if (adminLink) {
+        const perms = currentUser && Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+        const isAdmin = currentUser && (currentUser.username === 'admin' || currentUser.role === 'admin' || perms.includes('admin'));
+        adminLink.style.display = isAdmin ? 'inline-flex' : 'none';
+    }
+}
+
+function applyPermissions() {
+    const permDataView = hasPermission('data:view');
+    const permDataEdit = hasPermission('data:edit');
+    const permScheduleEdit = hasPermission('schedule:edit');
+    const permPlanView = hasPermission('plan:view');
+    const permPlanEdit = hasPermission('plan:edit');
+    const permPlanExport = hasPermission('plan:export');
+    const permDetailsView = hasPermission('details:view');
+    const permDetailsExport = hasPermission('details:export');
+
+    // Tabs visibility
+    const dataTabBtn = document.querySelector('button[data-tab="data"]');
+    if (dataTabBtn) dataTabBtn.style.display = permDataView ? 'inline-block' : 'none';
+    const dataTab = document.getElementById('dataTab');
+    if (dataTab && !permDataView) {
+        dataTab.classList.remove('active');
+        if (dataTabBtn) dataTabBtn.classList.remove('active');
+    }
+
+    const ganttTabBtn = document.querySelector('button[data-tab="gantt"]');
+    if (ganttTabBtn) ganttTabBtn.style.display = (permPlanView || permDetailsView) ? 'inline-block' : 'none';
+    if (ganttTabBtn && !permPlanView && !permDetailsView) {
+        ganttTabBtn.classList.remove('active');
+        const ganttTab = document.getElementById('ganttTab');
+        if (ganttTab) ganttTab.classList.remove('active');
+    }
+
+    // Auto-select first available tab if current is hidden
+    if (ganttTabBtn && dataTabBtn) {
+        if (!ganttTabBtn.classList.contains('active') && !dataTabBtn.classList.contains('active')) {
+            if (permPlanView || permDetailsView) {
+                ganttTabBtn.classList.add('active');
+                if (document.getElementById('ganttTab')) document.getElementById('ganttTab').classList.add('active');
+            } else if (permDataView) {
+                dataTabBtn.classList.add('active');
+                if (document.getElementById('dataTab')) document.getElementById('dataTab').classList.add('active');
+            }
+        }
+    }
+
+    // data:edit elements
+    const dataEditIds = ['saveTemplateBtn', 'importTemplateBtn', 'deleteTemplateBtn', 'addPhaseBtn', 'addTeamBtn'];
+    dataEditIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = !permDataEdit;
+        if (!permDataEdit) el.classList.add('disabled');
+        else el.classList.remove('disabled');
+    });
+    const newTeamName = document.getElementById('newTeamName');
+    if (newTeamName) newTeamName.disabled = !permDataEdit;
+
+    // schedule:edit elements
+    const scheduleEditIds = ['trainNumberInput', 'templateSelect', 'startTime', 'scheduleBtn', 'clearScheduleBtn'];
+    scheduleEditIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = !permScheduleEdit;
+        if (!permScheduleEdit) el.classList.add('disabled');
+        else el.classList.remove('disabled');
+    });
+
+    // plan:view elements
+    const ganttTopSection = document.getElementById('ganttTopSection');
+    if (ganttTopSection) ganttTopSection.style.display = permPlanView ? 'block' : 'none';
+
+    // plan:export elements
+    const exportGanttBtn = document.getElementById('exportGanttBtn');
+    if (exportGanttBtn) {
+        exportGanttBtn.disabled = !permPlanExport;
+        if (!permPlanExport) exportGanttBtn.style.display = 'none';
+        else exportGanttBtn.style.display = 'inline-block';
+    }
+
+    // details:view elements
+    const detailsSection = document.getElementById('detailsSection');
+    if (detailsSection) detailsSection.style.display = permDetailsView ? 'block' : 'none';
+
+    // details:export elements
+    const exportDetailsBtn = document.getElementById('exportDetailsBtn');
+    if (exportDetailsBtn) {
+        exportDetailsBtn.disabled = !permDetailsExport;
+        if (!permDetailsExport) exportDetailsBtn.style.display = 'none';
+        else exportDetailsBtn.style.display = 'inline-block';
+    }
+
+    // For re-rendering components that check permissions inside their render functions
+    if (typeof renderTeamList === 'function') renderTeamList();
+    if (typeof renderDataTree === 'function') renderDataTree();
+    if (typeof renderTrainPlanList === 'function') renderTrainPlanList();
+    if (typeof renderScheduleFromPlans === 'function' && (ganttChart || document.getElementById('ganttTree')?.innerHTML)) {
+        renderScheduleFromPlans();
+    }
+}
+
+function isEditingLocked() {
+    const modal = document.getElementById('modal');
+    return modal && modal.style.display === 'block';
+}
+
+function markStateDirty(immediate = false) {
+    if (isHttpMode() && !canWriteState()) {
+        alert(currentUser ? '当前账号无编辑权限。' : '请先登录。');
+        if (!currentUser) {
+            location.href = '/login.html';
+        } else {
+            pullStateFromServer({ force: true });
+        }
+        return;
+    }
+    stateDirty = true;
+    if (immediate) {
+        if (statePushTimer) clearTimeout(statePushTimer);
+        pushStateToServer();
+    } else {
+        scheduleStatePush();
+    }
+}
+
+function scheduleStatePush() {
+    if (!isHttpMode()) return;
+    if (statePushTimer) clearTimeout(statePushTimer);
+    statePushTimer = setTimeout(() => {
+        pushStateToServer();
+    }, 600);
+}
+
+async function pullStateFromServer(options = {}) {
+    if (!isHttpMode()) return;
+    if (statePullInFlight) return;
+    if (isEditingLocked() && options.force !== true) return;
+    statePullInFlight = true;
+    try {
+        const res = await fetch('/api/state', { cache: 'no-store' });
+        if (res.status === 401) {
+            location.href = '/login.html';
+            return;
+        }
+        if (!res.ok) return;
+        const state = await res.json();
+        const nextRevision = typeof state.revision === 'number' ? state.revision : null;
+        if (serverStateRevision !== null && nextRevision !== null && nextRevision === serverStateRevision) return;
+        if (stateDirty && options.force !== true) return;
+
+        if (state && typeof state.templates === 'object' && state.templates) {
+            templates = state.templates;
+            localStorage.setItem('schedulingTemplates', JSON.stringify(templates));
+            updateTemplateSelects();
+        }
+        if (state && Array.isArray(state.teams)) {
+            teamDictionary = state.teams;
+            localStorage.setItem('schedulingTeamsList', JSON.stringify(teamDictionary));
+            renderTeamList();
+        }
+        if (state && Array.isArray(state.trainPlans)) {
+            trainPlans = state.trainPlans;
+            localStorage.setItem('schedulingTrainPlans', JSON.stringify(trainPlans));
+            renderTrainPlanList();
+            updateTrainNumberFilter();
+            renderScheduleFromPlans();
+        }
+
+        serverStateRevision = nextRevision;
+        stateDirty = false;
+    } finally {
+        statePullInFlight = false;
+    }
+}
+
+async function pushStateToServer() {
+    if (!isHttpMode()) return;
+    if (!stateDirty) return;
+    if (statePushInFlight) return;
+    statePushInFlight = true;
+    try {
+        const payload = {
+            revision: serverStateRevision,
+            templates,
+            teams: teamDictionary,
+            trainPlans
+        };
+        const res = await fetch('/api/state', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res.status === 401) {
+            location.href = '/login.html';
+            return;
+        }
+        if (res.status === 403) {
+            stateDirty = false;
+            alert('当前账号无编辑权限。');
+            await pullStateFromServer({ force: true });
+            return;
+        }
+        if (res.status === 409) {
+            stateDirty = false;
+            await pullStateFromServer({ force: true });
+            alert('检测到其他用户已更新数据，本地已自动刷新。请重新执行你的保存/操作。');
+            return;
+        }
+        if (!res.ok) return;
+        const state = await res.json();
+        serverStateRevision = typeof state.revision === 'number' ? state.revision : serverStateRevision;
+        stateDirty = false;
+    } finally {
+        statePushInFlight = false;
+    }
+}
+
+function startStateSync() {
+    if (!isHttpMode()) return;
+    if (statePollTimer) return;
+    pullStateFromServer({ force: true });
+    statePollTimer = setInterval(() => {
+        pullStateFromServer();
+    }, 5000);
+}
+
+function loadTeams() {
+    const savedTeams = localStorage.getItem('schedulingTeamsList');
+    if (savedTeams) {
+        teamDictionary = JSON.parse(savedTeams);
+    }
+    renderTeamList();
+}
+
+function loadTrainPlans() {
+    const saved = localStorage.getItem('schedulingTrainPlans');
+    if (saved) {
+        trainPlans = JSON.parse(saved);
+    }
+    renderTrainPlanList();
+    updateTrainNumberFilter();
+    renderScheduleFromPlans();
+}
+
+function saveTrainPlans() {
+    localStorage.setItem('schedulingTrainPlans', JSON.stringify(trainPlans));
+    renderTrainPlanList();
+    updateTrainNumberFilter();
+    markStateDirty();
+}
+
+function addOrUpdateTrainPlan(trainNumber, templateName, startTimeStr) {
+    const number = (trainNumber || '').trim();
+    const tpl = (templateName || '').trim();
+    const start = (startTimeStr || '').trim();
+    if (!number || !tpl || !start) return;
+
+    const existing = trainPlans.find(p => p && p.number === number);
+    const orderOverrides = existing && existing.orderOverrides ? existing.orderOverrides : {};
+    const sbopStartOverrides = existing && existing.sbopStartOverrides ? existing.sbopStartOverrides : {};
+    const orderDayOverrides = existing && existing.orderDayOverrides ? existing.orderDayOverrides : {};
+    trainPlans = trainPlans.filter(p => p && p.number !== number);
+    trainPlans.push({ number, templateName: tpl, startTime: start, orderOverrides, sbopStartOverrides, orderDayOverrides });
+    trainPlans.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+    trainPlans = trainPlans.slice(0, 50);
+    saveTrainPlans();
+}
+
+function removeTrainPlan(trainNumber) {
+    const number = (trainNumber || '').trim();
+    if (!number) return;
+    trainPlans = trainPlans.filter(p => p && p.number !== number);
+    saveTrainPlans();
+    renderScheduleFromPlans();
+}
+
+function clearTrainPlans() {
+    trainPlans = [];
+    saveTrainPlans();
+    currentScheduleData = null;
+    renderEmptyGantt();
+    resetFilters();
+}
+
+function updateTrainNumberFilter() {
+    const select = document.getElementById('trainNumberFilter');
+    if (!select) return;
+
+    const currentVal = select.value;
+    select.innerHTML = '<option value="all">全部列车</option>';
+    trainPlans.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p.number;
+        option.textContent = p.number;
+        select.appendChild(option);
+    });
+
+    if (currentVal && (currentVal === 'all' || trainPlans.some(p => p.number === currentVal))) {
+        select.value = currentVal;
+    } else {
+        select.value = 'all';
+    }
+}
+
+function renderTrainPlanList() {
+    const container = document.getElementById('trainPlanList');
+    if (!container) return;
+    if (!trainPlans || trainPlans.length === 0) {
+        container.innerHTML = '<div class="train-plan-subtitle">暂无列车排程</div>';
+        return;
+    }
+
+    const canEdit = hasPermission('plan:edit');
+
+    container.innerHTML = trainPlans.map(p => `
+        <div class="train-plan-item">
+            <div class="train-plan-meta" onclick="selectTrainPlan('${p.number}')">
+                <div class="train-plan-title">列车号 ${p.number}</div>
+                <div class="train-plan-subtitle">${p.startTime}｜${p.templateName}</div>
+            </div>
+            <button class="train-plan-remove" style="${canEdit ? '' : 'display:none;'}" onclick="removeTrainPlan('${p.number}')">&times;</button>
+        </div>
+    `).join('');
+}
+
+function selectTrainPlan(trainNumber) {
+    const plan = trainPlans.find(p => p && p.number === trainNumber);
+    if (!plan) return;
+
+    const input = document.getElementById('trainNumberInput');
+    if (input) input.value = plan.number;
+
+    const templateSelect = document.getElementById('templateSelect');
+    if (templateSelect) templateSelect.value = plan.templateName;
+
+    const startTimeInput = document.getElementById('startTime');
+    if (startTimeInput) startTimeInput.value = plan.startTime;
+
+    const trainNumberFilter = document.getElementById('trainNumberFilter');
+    if (trainNumberFilter) trainNumberFilter.value = plan.number;
+}
+
+function buildMultiTrainSchedule() {
+    const trains = [];
+    let globalStart = null;
+    let globalEnd = null;
+
+    trainPlans.forEach(plan => {
+        const template = templates[plan.templateName];
+        if (!template) return;
+
+        const startDate = new Date(plan.startTime);
+        startDate.setHours(8, 0, 0, 0);
+        const schedule = calculateTaktSchedule(
+            plan.number,
+            template,
+            startDate,
+            plan.orderOverrides || {},
+            plan.sbopStartOverrides || {},
+            plan.orderDayOverrides || {}
+        );
+        if (!schedule || !schedule.trains || schedule.trains.length === 0) return;
+
+        const train = schedule.trains[0];
+        trains.push(train);
+
+        const start = new Date(train.start_time);
+        const end = new Date(train.end_time);
+        if (!globalStart || start < globalStart) globalStart = start;
+        if (!globalEnd || end > globalEnd) globalEnd = end;
+    });
+
+  if (trains.length === 0) {
+    return null;
+  }
+
+  // 按开始时间降序排列：越晚开始的排在越前面
+  trains.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
+
+  const totalDuration = globalStart && globalEnd ? (globalEnd - globalStart) / (1000 * 60 * 60) : 0;
+    return {
+        trains,
+        totalStartTime: globalStart,
+        totalEndTime: globalEnd,
+        totalDuration
+    };
+}
+
+function renderEmptyGantt() {
+    const tree = document.getElementById('ganttTree');
+    if (tree) {
+        tree.innerHTML = `
+            <div class="empty-state">
+                <h3>暂无排程数据</h3>
+                <p>请先添加列车排程</p>
+            </div>
+        `;
+    }
+    const info = document.getElementById('ganttInfo');
+    if (info) info.innerHTML = '';
+}
+
+function renderScheduleFromPlans() {
+    if (!trainPlans || trainPlans.length === 0) {
+        currentScheduleData = null;
+        renderEmptyGantt();
+        return;
+    }
+
+    const scheduleData = buildMultiTrainSchedule();
+    if (!scheduleData) {
+        currentScheduleData = null;
+        renderEmptyGantt();
+        return;
+    }
+
+    currentScheduleData = scheduleData;
+    renderGanttTree(scheduleData);
+}
+
+function saveTeams() {
+    localStorage.setItem('schedulingTeamsList', JSON.stringify(teamDictionary));
+    renderTeamList();
+    markStateDirty(true);
+}
+
+function addTeam() {
+    const input = document.getElementById('newTeamName');
+    const name = input.value.trim();
+    if (name && !teamDictionary.includes(name)) {
+        teamDictionary.push(name);
+        input.value = '';
+        saveTeams();
+    } else if (teamDictionary.includes(name)) {
+        alert('该班组已存在！');
+    }
+}
+
+function deleteTeam(name) {
+    if (confirm(`确定要删除班组 "${name}" 吗？`)) {
+        teamDictionary = teamDictionary.filter(t => t !== name);
+        saveTeams();
+    }
+}
+
+function renderTeamList() {
+    const list = document.getElementById('teamList');
+    if (!list) return;
+    const canEdit = hasPermission('data:edit');
+    list.innerHTML = teamDictionary.map(team => `
+        <div class="team-tag">
+            <span>${team}</span>
+            <button ${canEdit ? '' : 'style="display:none;"'} onclick="deleteTeam('${team}')">&times;</button>
+        </div>
+    `).join('');
+}
+
+function initializeDateTimeInput() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    document.getElementById('startTime').value = `${year}-${month}-${day}`;
+}
+
+function setupEventListeners() {
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async function() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {}
+            location.href = '/login.html';
+        });
+    }
+    document.getElementById('scheduleBtn').addEventListener('click', generateSchedule);
+    const clearScheduleBtn = document.getElementById('clearScheduleBtn');
+    if (clearScheduleBtn) {
+        clearScheduleBtn.addEventListener('click', function() {
+            if (confirm('确定要清空所有列车排程吗？此操作不可恢复！')) {
+                clearTrainPlans();
+            }
+        });
+    }
+    
+    // 模板管理相关
+    document.getElementById('saveTemplateBtn').addEventListener('click', saveCurrentAsTemplate);
+    document.getElementById('deleteTemplateBtn').addEventListener('click', deleteSelectedTemplate);
+    document.getElementById('downloadTemplateBtn').addEventListener('click', downloadTemplateAsExcel);
+    document.getElementById('addPhaseBtn').addEventListener('click', () => showAddPhaseModal());
+    
+    // 首页模板选择
+    document.getElementById('templateSelect').addEventListener('change', function() {
+        const templateName = this.value;
+        if (templateName && templates[templateName]) {
+            // 仅用于排程，不改变当前编辑数据
+        }
+    });
+
+    const trainNumberFilter = document.getElementById('trainNumberFilter');
+    if (trainNumberFilter) {
+        trainNumberFilter.addEventListener('change', function() {
+            const selected = this.value;
+            if (selected && selected !== 'all') {
+                selectTrainPlan(selected);
+            }
+        });
+    }
+
+    // 结构化数据管理页面模板选择
+    document.getElementById('editTemplateSelect').addEventListener('change', function() {
+        const templateName = this.value;
+        if (templateName && templates[templateName]) {
+            templateData = JSON.parse(JSON.stringify(templates[templateName]));
+            document.getElementById('templateName').value = templateName;
+            renderDataTree();
+        } else {
+            templateData = [];
+            document.getElementById('templateName').value = '';
+            renderDataTree();
+        }
+    });
+    
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            this.classList.add('active');
+            const tabId = this.dataset.tab;
+            document.getElementById(tabId + 'Tab').classList.add('active');
+            
+            // 处理侧边栏显示/隐藏
+            const sidebar = document.querySelector('.sidebar');
+            if (tabId === 'data') {
+                sidebar.style.display = 'none';
+            } else {
+                sidebar.style.display = 'block';
+            }
+
+            if (tabId === 'gantt') {
+                setTimeout(refreshGanttHorizontalControls, 0);
+                setTimeout(refreshGanttHorizontalControls, 200);
+            }
+        });
+    });
+    
+    document.querySelector('.close').addEventListener('click', closeModal);
+    window.addEventListener('click', function(e) {
+        if (e.target === document.getElementById('modal')) {
+            closeModal();
+        }
+    });
+}
+
+function loadTemplates() {
+    const saved = localStorage.getItem('schedulingTemplates');
+    if (saved) {
+        templates = JSON.parse(saved);
+    }
+    updateTemplateSelects();
+    
+    // 默认加载第一个模板（如果存在）
+    const templateNames = Object.keys(templates);
+    if (templateNames.length > 0) {
+        templateData = JSON.parse(JSON.stringify(templates[templateNames[0]]));
+        document.getElementById('templateName').value = templateNames[0];
+        const editSelect = document.getElementById('editTemplateSelect');
+        if (editSelect) editSelect.value = templateNames[0];
+    }
+    renderDataTree();
+}
+
+function saveTemplatesToLocal() {
+    localStorage.setItem('schedulingTemplates', JSON.stringify(templates));
+    updateTemplateSelects();
+    markStateDirty(true);
+}
+
+function updateTemplateSelects() {
+    const selects = [document.getElementById('templateSelect'), document.getElementById('editTemplateSelect')];
+    
+    selects.forEach(select => {
+        if (!select) return;
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">-- 请选择模板 --</option>';
+        
+        Object.keys(templates).forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            select.appendChild(option);
+        });
+        
+        if (currentVal && templates[currentVal]) {
+            select.value = currentVal;
+        }
+    });
+}
+
+function downloadTemplateAsExcel() {
+    if (!templateData || templateData.length === 0) {
+        alert('当前没有可导出的模板数据！');
+        return;
+    }
+    
+    const excelData = [];
+    const orderDetails = [];
+    templateData.forEach(phase => {
+        phase.sbops.forEach(sbop => {
+            const row = {
+                '阶段名称': phase.name,
+                '阶段天偏移': phase.startDayOffset || 1,
+                'SBOP名称': sbop.name,
+                'SBOP天偏移': sbop.startDayOffset || 1,
+                'SBOP节拍': sbop.takt || 3,
+                'SBOP工时': sbop.totalHours || 0,
+                'SBOP人数': sbop.workerCount || 1,
+                '班组': sbop.team || ''
+            };
+            
+            // 添加 1#-8# 车工单数量
+            for (let i = 1; i <= 8; i++) {
+                row[`${i}#车工单数量`] = (sbop.carCounts && sbop.carCounts[i]) ? sbop.carCounts[i] : 0;
+            }
+            
+            excelData.push(row);
+
+            const orders = (sbop.orders && sbop.orders.length > 0) 
+                ? sbop.orders 
+                : generateOrdersFromCarCounts(sbop.carCounts || {}, sbop.totalHours || 0, sbop.workerCount || 1);
+            orders.forEach((o, idx) => {
+                orderDetails.push({
+                    '阶段名称': phase.name,
+                    'SBOP名称': sbop.name,
+                    '顺序': idx + 1,
+                    '工单名称': o.name,
+                    '工时(小时)': o.duration,
+                    '人数': o.workerCount
+                });
+            });
+        });
+    });
+    
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '模板数据');
+    if (orderDetails.length > 0) {
+        const ws2 = XLSX.utils.json_to_sheet(orderDetails);
+        XLSX.utils.book_append_sheet(wb, ws2, '工单明细');
+    }
+    
+    const name = document.getElementById('templateName').value.trim() || '排程模板';
+    XLSX.writeFile(wb, `${name}.xlsx`);
+}
+
+function importTemplate(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const templateSheet = workbook.Sheets['模板数据'] || workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(templateSheet);
+
+        if (jsonData.length === 0) {
+            alert('Excel 文件内容为空！');
+            return;
+        }
+
+        const newTemplateData = [];
+        const phasesMap = {};
+        const sbopMapByName = {};
+
+        jsonData.forEach(row => {
+            const phaseName = row['阶段名称'];
+            if (!phasesMap[phaseName]) {
+                phasesMap[phaseName] = {
+                    id: Date.now() + Math.random(),
+                    name: phaseName,
+                    startDayOffset: parseInt(row['阶段天偏移']) || 1,
+                    sbops: []
+                };
+                newTemplateData.push(phasesMap[phaseName]);
+            }
+
+            const carCounts = {};
+            for (let i = 1; i <= 8; i++) {
+                carCounts[i] = parseInt(row[`${i}#车工单数量`]) || 0;
+            }
+
+            const totalHours = parseFloat(row['SBOP工时']) || 0;
+            const workerCount = parseInt(row['SBOP人数']) || 1;
+            const sbopObj = {
+                id: Date.now() + Math.random(),
+                name: row['SBOP名称'],
+                startDayOffset: parseInt(row['SBOP天偏移']) || 1,
+                takt: parseInt(row['SBOP节拍']) || 3,
+                totalHours: totalHours,
+                workerCount: workerCount,
+                carCounts: carCounts,
+                team: row['班组'] || '',
+                orders: []
+            };
+            phasesMap[phaseName].sbops.push(sbopObj);
+            const key = `${phaseName}@@${sbopObj.name}`;
+            sbopMapByName[key] = sbopObj;
+        });
+
+        // 如果存在“工单明细”sheet，则按其还原工单；否则按车号数量生成
+        const orderSheet = workbook.Sheets['工单明细'];
+        if (orderSheet) {
+            const orderRows = XLSX.utils.sheet_to_json(orderSheet);
+            const grouped = {};
+            orderRows.forEach(row => {
+                const key = `${row['阶段名称']}@@${row['SBOP名称']}`;
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push({
+                    seq: parseInt(row['顺序']) || 0,
+                    name: row['工单名称'],
+                    duration: parseFloat(row['工时(小时)']) || 0,
+                    workerCount: parseInt(row['人数']) || 0
+                });
+            });
+            Object.keys(grouped).forEach(key => {
+                const sbopObj = sbopMapByName[key];
+                if (!sbopObj) return;
+                grouped[key].sort((a, b) => (a.seq - b.seq));
+                sbopObj.orders = grouped[key].map(r => ({
+                    id: Date.now() + Math.random(),
+                    name: r.name,
+                    duration: r.duration,
+                    workerCount: r.workerCount || (sbopObj.workerCount || 1)
+                }));
+            });
+            Object.values(sbopMapByName).forEach(sbopObj => {
+                if (!sbopObj.orders || sbopObj.orders.length === 0) {
+                    sbopObj.orders = generateOrdersFromCarCounts(sbopObj.carCounts || {}, sbopObj.totalHours || 0, sbopObj.workerCount || 1);
+                }
+            });
+        } else {
+            // 无明细表时，按车号生成
+            newTemplateData.forEach(phase => {
+                phase.sbops.forEach(sbopObj => {
+                    sbopObj.orders = generateOrdersFromCarCounts(sbopObj.carCounts || {}, sbopObj.totalHours || 0, sbopObj.workerCount || 1);
+                });
+            });
+        }
+
+        templateData = newTemplateData;
+        document.getElementById('templateName').value = file.name.replace('.xlsx', '');
+        renderDataTree();
+        alert('模板导入成功！');
+    };
+    reader.readAsArrayBuffer(file);
+    input.value = ''; // 重置 input 以便下次选择同一文件
+}
+
+function exportGanttToExcel() {
+    // 获取当前渲染的排程数据（优先从全局变量取，避免重复计算）
+    let scheduleData = currentScheduleData;
+    if (!scheduleData) {
+        const trainNumber = document.getElementById('trainNumberInput').value.trim();
+        const templateName = document.getElementById('templateSelect').value;
+        const startTimeStr = document.getElementById('startTime').value;
+        if (!trainNumber || !templateName || !startTimeStr) {
+            alert('请先生成排程后再导出！');
+            return;
+        }
+        const template = templates[templateName];
+        const trainStartDate = new Date(startTimeStr);
+        trainStartDate.setHours(8, 0, 0, 0);
+        scheduleData = calculateTaktSchedule(trainNumber, template, trainStartDate);
+    }
+
+    if (!scheduleData.trains || scheduleData.trains.length === 0) {
+        alert('暂无排程数据可导出！');
+        return;
+    }
+
+    // ===== 计算日期范围 =====
+    let minTime = Infinity, maxTime = -Infinity;
+    function scanTime(obj) {
+        if (obj.start_time) { const t = new Date(obj.start_time).getTime(); if (t < minTime) minTime = t; }
+        if (obj.end_time) { const t = new Date(obj.end_time).getTime(); if (t > maxTime) maxTime = t; }
+    }
+    scheduleData.trains.forEach(train => {
+        scanTime(train);
+        (train.phases || []).forEach(phase => {
+            scanTime(phase);
+            (phase.sbops || []).forEach(sbop => {
+                scanTime(sbop);
+                (sbop.orders || []).forEach(order => {
+                    const st = order.start_time.getTime(), et = order.end_time.getTime();
+                    if (st < minTime) minTime = st; if (et > maxTime) maxTime = et;
+                });
+            });
+        });
+    });
+
+    const msPerDay = 24 * 60 * 60 * 1000;
+    // 从 minDate 前一天开始，到 maxDate 后一天结束，确保完整显示
+    const minDate = new Date(minTime);
+    minDate.setHours(0, 0, 0, 0);
+    const totalDays = Math.ceil((maxTime - minDate.getTime()) / msPerDay) + 1;
+
+    // ===== 构建甘特图行数据 =====
+    const rows = [];
+    const colors = {
+        train:   { bg: 'FF667EEA', fg: 'FFFFFF' },
+        phase:   { bg: 'FF1976D2', fg: 'FFFFFF' },
+        sbop:    { bg: 'FF7B1FA2', fg: 'FFFFFF' },
+        order:   { bg: 'FF4CAF50', fg: 'FFFFFF' },
+        grid:    {FFF2F2F2'}
+    };
+
+    scheduleData.trains.forEach((train, ti) => {
+        const tLeft = Math.round((new Date(train.start_time) - minDate) / msPerDay);
+        const tWidth = Math.round((new Date(train.end_time) - new Date(train.start_time)) / msPerDay) + 1;
+
+        rows.push({ indent: 0, name: `${ti+1}. 列车号: ${train.number} (${tWidth}天)`, left: tLeft, width: tWidth, color: colors.train });
+
+        if (train.phases) train.phases.forEach((phase, pi) => {
+            const pLeft = Math.round((new Date(phase.start_time) - minDate) / msPerDay);
+            const pWidth = Math.round((new Date(phase.end_time) - new Date(phase.start_time)) / msPerDay) + 1;
+
+            rows.push({ indent: 1, name: `  ${ti+1}.${pi+1}. ${phase.name} (${pWidth}天)`, left: pLeft, width: pWidth, color: colors.phase });
+
+            if (phase.sbops) phase.sbops.forEach((sbop, si) => {
+                const sLeft = Math.round((new Date(sbop.start_time) - minDate) / msPerDay);
+                const sWidth = Math.round((new Date(sbop.end_time) - new Date(sbop.start_time)) / msPerDay) + 1;
+
+                rows.push({ indent: 2, name: `    ${ti+1}.${pi+1}.${si+1}. ${sbop.name} (${sWidth}天)`, left: sLeft, width: sWidth, color: colors.sbop });
+
+                if (sbop.orders) sbop.orders.forEach((order, oi) => {
+                    const oLeft = Math.round((new Date(order.start_time) - minDate) / msPerDay);
+                    const oWidth = Math.round((new Date(order.end_time) - new Date(order.start_time)) / msPerDay) + 1;
+
+                    rows.push({
+                        indent: 3,
+                        name: `      ${ti+1}.${pi+1}.${si+1}.${oi+1}. ${order.name} (${oWidth}天, ${order.duration}h/${order.workerCount}人)`,
+                        left: oLeft, width: oWidth, color: colors.order
+                    });
+                });
+            });
+        });
+    });
+
+    // ===== 构建 Excel 工作表数据（AOA格式）=====
+    // 第1列: 名称 | 第2~N+1列: 每日单元格
+    const aoaData = [];
+
+    // 表头第1行: 周信息
+    const headerRow1 = ['结构化数据'];
+    const weekLabels = ['日','一','二','三','四','五','六'];
+    for (let d = 0; d < totalDays; d++) {
+        const dt = new Date(minDate.getTime() + d * msPerDay);
+        if (dt.getDay() === 0 || d === 0) {
+            const wkStart = new Date(dt);
+            let wkEnd = new Date(dt); wkEnd.setDate(wkEnd.getDate() + 6);
+            headerRow1.push(`第${Math.ceil((d + (minDate.getDay() === 0 ? 1 : 7 - minDate.getDay()))/7)}周`);
+        } else {
+            headerRow1.push('');
+        }
+    }
+    aoaData.push(headerRow1);
+
+    // 表头第2行: 日期数字
+    const headerRow2 = ['日期'];
+    for (let d = 0; d < totalDays; d++) {
+        const dt = new Date(minDate.getTime() + d * msPerDay);
+        headerRow2.push(`${dt.getMonth()+1}/${dt.getDate()}`);
+    }
+    aoaData.push(headerRow2);
+
+    // 表头第3行: 星期
+    const headerRow3 = ['星期'];
+    for (let d = 0; d < totalDays; d++) {
+        const dt = new Date(minDate.getTime() + d * msPerDay);
+        headerRow3.push(weekLabels[dt.getDay()]);
+    }
+    aoaData.push(headerRow3);
+
+    // 数据行
+    rows.forEach(row => {
+        const rowData = [row.name];
+        for (let d = 0; d < totalDays; d++) {
+            rowData.push(d >= row.left && d < row.left + row.width ? '█' : '');
+        }
+        aoaData.push(rowData);
+    });
+
+    // ===== 创建工作簿并设置样式 =====
+    const ws = XLSX.utils.aoa_to_sheet(aoaData);
+
+    // 设置列宽: A列较宽，日期列固定宽度
+    ws['!cols'] = [
+        { wch: 55 },  // 名称列足够宽
+    ];
+    for (let d = 0; d < totalDays; d++) {
+        ws['!cols'].push({ wch: 3.5 });  // 日期列窄一点
+    }
+
+    // 设置行高
+    ws['!rows'] = [{ hpt: 18 }, { hpt: 16 }, { hpt: 16 }];  // 三行表头
+    for (let i = 0; i < rows.length; i++) {
+        ws['!rows'].push({ hpt: 20 });  // 数据行高度
+    }
+
+    // ===== 单元格填充色和字体样式 =====
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r; R <= range.e.r; R++) {
+        for (let C = range.s.c; C <= range.e.c; C++) {
+            const addr = XLSX.utils.encode_cell({ r: R, c: C });
+            if (!ws[addr]) continue;
+
+            // 表头样式
+            if (R < 3) {
+                if (!ws[addr].s) ws[addr].s = {};
+                ws[addr].s.fill = { patternType: 'solid', fgColor: { rgb: 'FF667EEA' } };
+                ws[addr].s.font = { bold: true, color: { rgb: 'FFFFFFFF' }, sz: 10 };
+                ws[addr].s.alignment = { horizontal: 'center', vertical: 'center', wrapText: true };
+                continue;
+            }
+
+            // 数据行的名称列（C=0）
+            if (C === 0) {
+                if (!ws[addr].s) ws[addr].s = {};
+                const rowIdx = R - 3;
+                if (rowIdx < rows.length && rows[rowIdx]) {
+                    ws[addr].s.font = { bold: rowIdx === undefined ? false : true, sz: 10,
+                        color: { rgb: rows[rowIdx].color.fg.replace('#', '') === 'FFFFFF' ? '333333' : '333333' } };
+                }
+                ws[addr].s.alignment = { vertical: 'center' };
+                continue;
+            }
+
+            // 时间条单元格（C>0）
+            const dayIdx = C - 1;
+            const rowIdx = R - 3;
+            if (rowIdx < rows.length && rows[rowIdx] && dayIdx >= rows[rowIdx].left && dayIdx < rows[rowIdx].left + rows[rowIdx].width) {
+                if (!ws[addr].s) ws[addr].s = {};
+                ws[addr].s.fill = { patternType: 'solid', fgColor: { rgb: rows[rowIdx].color.bg.replace('#', '').toUpperCase() } };
+                ws[addr].s.font = { color: { rgb: rows[rowIdx].color.fg }, sz: 9 };
+                ws[addr].s.alignment = { horizontal: 'center', vertical: 'center' };
+            } else {
+                // 空白网格线效果
+                if (!ws[addr].s) ws[addr].s = {};
+                ws[addr].s.fill = { patternType: 'solid', fgColor: { rgb: 'FFF8F9FA' } };
+            }
+        }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '生产计划甘特图');
+    const trainLabel = scheduleData.trains.map(t => t.number).join('_') || '排程';
+    XLSX.writeFile(wb, `生产计划甘特图_${trainLabel}_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+async function exportGanttAsImage() {
+  const container = document.getElementById('ganttScrollContainer');
+  if (!container) {
+    alert('未找到甘特图容器！');
+    return;
+  }
+  const wrapper = container.querySelector('.gantt-chart-wrapper') || container;
+  const bottomScroll = document.getElementById('ganttBottomScroll');
+  const prevScrollLeft = container.scrollLeft;
+  const prevBottomScrollLeft = bottomScroll ? bottomScroll.scrollLeft : 0;
+  const prevScrollTop = container.scrollTop;
+
+  const toggleStates = [];
+  document.querySelectorAll('.gantt-children-container').forEach(el => {
+    toggleStates.push({
+      el,
+      display: el.style.display,
+      maxHeight: el.style.maxHeight,
+      classCollapsed: el.classList.contains('collapsed')
+    });
+  });
+  const toggles = [];
+  document.querySelectorAll('.gantt-toggle').forEach(el => {
+    toggles.push({
+      el,
+      text: el.textContent,
+      classExpanded: el.classList.contains('expanded'),
+      classCollapsed: el.classList.contains('collapsed'),
+      visibility: el.style.visibility
+    });
+  });
+
+  if (typeof expandAllGantt === 'function') {
+    expandAllGantt();
+  }
+  container.scrollLeft = 0;
+  container.scrollTop = 0;
+  if (bottomScroll) bottomScroll.scrollLeft = 0;
+
+  // 等待 DOM 更新完成
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  const width = Math.max(wrapper.scrollWidth || wrapper.offsetWidth, 800);
+  const height = wrapper.scrollHeight || container.offsetHeight || 600;
+  if (typeof html2canvas !== 'function') {
+    alert('缺少截图库，无法导出甘特图图像。请联系管理员。');
+    return;
+  }
+
+  // 关键修复：临时将容器设置为能包含全部内容的样式，避免 html2canvas 裁剪
+  const originalWrapperWidth = wrapper.style.width;
+  const originalWrapperHeight = wrapper.style.height;
+  const originalContainerOverflow = container.style.overflow;
+  const originalContainerHeight = container.style.height;
+  
+  container.style.overflow = 'visible';
+  container.style.height = 'auto';
+  wrapper.style.width = width + 'px';
+  wrapper.style.height = height + 'px';
+
+  try {
+    const canvas = await html2canvas(wrapper, {
+      backgroundColor: '#ffffff',
+      width: width,
+      height: height,
+      scale: 1.5,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      imageTimeout: 0,
+      onclone: function(clonedDoc) {
+        // 确保克隆的文档中样式正确
+        const clonedWrapper = clonedDoc.querySelector('.gantt-chart-wrapper');
+        if (clonedWrapper) {
+          clonedWrapper.style.overflow = 'visible';
+        }
+      }
+    });
+
+    // 使用 toDataURL 方式（兼容性更好）
+    const dataUrl = canvas.toDataURL('image/png');
+    
+    // 验证数据 URL 是否有效
+    if (!dataUrl || dataUrl === 'data:,' || dataUrl.length < 100) {
+      alert('生成图片数据失败，请重试。');
+      return;
+    }
+
+    const link = document.createElement('a');
+    const dateStr = new Date().toISOString().split('T')[0];
+    link.download = `甘特图_${dateStr}.png`;
+    link.href = dataUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (error) {
+    console.error('导出甘特图失败:', error);
+    alert('导出图片失败：' + (error.message || '未知错误'));
+  }
+
+  // 恢复原有样式
+  container.style.overflow = originalContainerOverflow;
+  container.style.height = originalContainerHeight;
+  wrapper.style.width = originalWrapperWidth;
+  wrapper.style.height = originalWrapperHeight;
+
+  toggleStates.forEach(s => {
+        if (!s.el) return;
+        if (s.display === undefined || s.display === null || s.display === '') {
+            s.el.style.removeProperty('display');
+        } else {
+            s.el.style.display = s.display;
+        }
+        if (s.maxHeight === undefined || s.maxHeight === null || s.maxHeight === '') {
+            s.el.style.removeProperty('max-height');
+        } else {
+            s.el.style.maxHeight = s.maxHeight;
+        }
+        if (s.classCollapsed) s.el.classList.add('collapsed');
+        else s.el.classList.remove('collapsed');
+    });
+    toggles.forEach(s => {
+        if (!s.el) return;
+        s.el.textContent = s.text;
+        if (s.classExpanded) s.el.classList.add('expanded');
+        else s.el.classList.remove('expanded');
+        if (s.classCollapsed) s.el.classList.add('collapsed');
+        else s.el.classList.remove('collapsed');
+        if (s.visibility === undefined || s.visibility === null || s.visibility === '') {
+            s.el.style.removeProperty('visibility');
+        } else {
+            s.el.style.visibility = s.visibility;
+        }
+    });
+    container.scrollLeft = prevScrollLeft;
+    container.scrollTop = prevScrollTop;
+    if (bottomScroll) bottomScroll.scrollLeft = prevBottomScrollLeft;
+}
+
+function saveCurrentAsTemplate() {
+    const name = document.getElementById('templateName').value.trim();
+    if (!name) {
+        alert('请输入模板名称！');
+        return;
+    }
+    
+    if (templateData.length === 0) {
+        alert('模板数据不能为空！');
+        return;
+    }
+    
+    templates[name] = JSON.parse(JSON.stringify(templateData));
+    saveTemplatesToLocal();
+    alert(`模板 "${name}" 已保存！`);
+}
+
+function deleteSelectedTemplate() {
+    const editSelect = document.getElementById('editTemplateSelect');
+    const homeSelect = document.getElementById('templateSelect');
+    const templateNameInput = document.getElementById('templateName');
+    const inputName = templateNameInput ? templateNameInput.value.trim() : '';
+
+    const nameFromEdit = editSelect ? editSelect.value : '';
+    const nameFromHome = homeSelect ? homeSelect.value : '';
+    const name = nameFromEdit || nameFromHome || (inputName && templates[inputName] ? inputName : '');
+    
+    if (!name) {
+        alert('请先选择要删除的模板！');
+        return;
+    }
+    
+    if (confirm(`确定要删除模板 "${name}" 吗？`)) {
+        delete templates[name];
+        saveTemplatesToLocal();
+        templateData = [];
+        if (templateNameInput) templateNameInput.value = '';
+        if (editSelect && editSelect.value === name) editSelect.value = '';
+        if (homeSelect && homeSelect.value === name) homeSelect.value = '';
+        renderDataTree();
+    }
+}
+
+function generateSchedule() {
+    const trainNumber = document.getElementById('trainNumberInput').value.trim();
+    const templateName = document.getElementById('templateSelect').value;
+    const startTimeStr = document.getElementById('startTime').value;
+    
+    if (!trainNumber) {
+        alert('请输入列车号！');
+        return;
+    }
+    if (!templateName) {
+        alert('请选择数据模板！');
+        return;
+    }
+    if (!startTimeStr) {
+        alert('请选择开始作业时间！');
+        return;
+    }
+    
+    const template = templates[templateName];
+    if (!template) {
+        alert('模板不存在！');
+        return;
+    }
+
+    addOrUpdateTrainPlan(trainNumber, templateName, startTimeStr);
+    renderScheduleFromPlans();
+    const trainNumberFilter = document.getElementById('trainNumberFilter');
+    if (trainNumberFilter) trainNumberFilter.value = 'all';
+    
+    // 切换到甘特图标签页
+    document.querySelectorAll('.tab-btn')[0].click();
+}
+
+function calculateTaktSchedule(trainNumber, template, trainStartDate, orderOverrides = {}, sbopStartOverrides = {}, orderDayOverrides = {}) {
+    const train = {
+        number: trainNumber,
+        phases: []
+    };
+    
+    let totalMaxDate = new Date(trainStartDate);
+    
+    template.forEach(phaseTemplate => {
+        const phaseStartDate = new Date(trainStartDate);
+        phaseStartDate.setDate(phaseStartDate.getDate() + (phaseTemplate.startDayOffset || 1) - 1);
+        
+        const phase = {
+            id: phaseTemplate.id,
+            name: phaseTemplate.name,
+            start_time: new Date(phaseStartDate),
+            end_time: new Date(phaseStartDate),
+            sbops: []
+        };
+        
+        phaseTemplate.sbops.forEach(sbopTemplate => {
+            const sbopStartDate = new Date(phaseStartDate);
+            const sbopKey = `${phaseTemplate.id}:${sbopTemplate.id}`;
+            const overrideStartDayOffset = sbopStartOverrides ? sbopStartOverrides[sbopKey] : null;
+            const sbopStartDayOffset = (typeof overrideStartDayOffset === 'number' && Number.isFinite(overrideStartDayOffset))
+                ? overrideStartDayOffset
+                : (sbopTemplate.startDayOffset || 1);
+            sbopStartDate.setDate(sbopStartDate.getDate() + sbopStartDayOffset - 1);
+            
+            // 使用 SBOP 模板中已生成的工单列表，如果没有则尝试从 carCounts 生成（兼容旧数据）
+            let allOrders = sbopTemplate.orders || [];
+            if (allOrders.length === 0 && sbopTemplate.carCounts) {
+                allOrders = generateOrdersFromCarCounts(
+                    sbopTemplate.carCounts, 
+                    sbopTemplate.totalHours || 8, 
+                    sbopTemplate.workerCount || 1
+                );
+            }
+            const takt = sbopTemplate.takt || 3;
+            const overrideKey = `${phaseTemplate.id}:${sbopTemplate.id}`;
+            const overrideOrderIds = orderOverrides ? orderOverrides[overrideKey] : null;
+            if (Array.isArray(overrideOrderIds) && overrideOrderIds.length > 0) {
+                const overrideSet = new Set(overrideOrderIds);
+                const orderById = new Map(allOrders.map(o => [o.id, o]));
+                const reordered = [];
+                overrideOrderIds.forEach(id => {
+                    const found = orderById.get(id);
+                    if (found) reordered.push(found);
+                });
+                allOrders.forEach(o => {
+                    if (!overrideSet.has(o.id)) reordered.push(o);
+                });
+                allOrders = reordered;
+            }
+
+            const durationDays = Math.ceil(allOrders.length / takt) || 1;
+            const sbopOrderDayMap = (orderDayOverrides && typeof orderDayOverrides === 'object') ? orderDayOverrides[overrideKey] : null;
+            
+            const sbop = {
+                id: sbopTemplate.id,
+                name: sbopTemplate.name,
+                team: sbopTemplate.team,
+                takt: takt,
+                start_time: new Date(sbopStartDate),
+                end_time: null,
+                orders: []
+            };
+            
+            // 计算SBOP结束时间
+            const sbopEndDate = new Date(sbopStartDate);
+            sbopEndDate.setDate(sbopEndDate.getDate() + durationDays - 1);
+            sbopEndDate.setHours(17, 0, 0, 0);
+            sbop.end_time = sbopEndDate;
+            
+            // 分配工单到每一天
+            allOrders.forEach((order, index) => {
+                let dayOffset = Math.floor(index / takt);
+                const forced = sbopOrderDayMap && typeof sbopOrderDayMap === 'object' ? sbopOrderDayMap[order.id] : null;
+                if (typeof forced === 'number' && Number.isFinite(forced)) {
+                    dayOffset = forced;
+                }
+                dayOffset = Math.max(0, Math.min(durationDays - 1, dayOffset));
+                const orderStartDate = new Date(sbopStartDate);
+                orderStartDate.setDate(orderStartDate.getDate() + dayOffset);
+                orderStartDate.setHours(8, 0, 0, 0);
+                
+                const orderEndDate = new Date(orderStartDate);
+                orderEndDate.setHours(17, 0, 0, 0);
+                
+                sbop.orders.push({
+                    ...order,
+                    start_time: orderStartDate,
+                    end_time: orderEndDate
+                });
+            });
+            
+            phase.sbops.push(sbop);
+            
+            if (sbop.end_time > phase.end_time) {
+                phase.end_time = new Date(sbop.end_time);
+            }
+        });
+        
+        train.phases.push(phase);
+        
+        if (phase.end_time > totalMaxDate) {
+            totalMaxDate = new Date(phase.end_time);
+        }
+    });
+    
+    train.start_time = trainStartDate;
+    train.end_time = totalMaxDate;
+    
+    return {
+        trains: [train],
+        totalStartTime: trainStartDate,
+        totalEndTime: totalMaxDate,
+        totalDuration: (totalMaxDate - trainStartDate) / (1000 * 60 * 60)
+    };
+}
+
+function getNextWorkTime(date) {
+    const d = new Date(date);
+    const hour = d.getHours();
+    
+    if (hour >= 12 && hour < 13) {
+        d.setHours(13, 0, 0, 0);
+    }
+    
+    if (hour >= 17) {
+        d.setDate(d.getDate() + 1);
+        d.setHours(8, 0, 0, 0);
+    } else if (hour < 8) {
+        d.setHours(8, 0, 0, 0);
+    }
+    
+    return d;
+}
+
+function addWorkHours(startDate, hours) {
+    let current = new Date(startDate);
+    let remainingHours = hours;
+    
+    while (remainingHours > 0) {
+        const hour = current.getHours();
+        
+        if (hour >= 17) {
+            current.setDate(current.getDate() + 1);
+            current.setHours(8, 0, 0, 0);
+            continue;
+        }
+        
+        if (hour < 8) {
+            current.setHours(8, 0, 0, 0);
+            continue;
+        }
+        
+        if (hour >= 12 && hour < 13) {
+            current.setHours(13, 0, 0, 0);
+            continue;
+        }
+        
+        let hoursUntilEnd = 17 - hour;
+        
+        const hoursToAdd = Math.min(remainingHours, hoursUntilEnd);
+        current = new Date(current.getTime() + hoursToAdd * 60 * 60 * 1000);
+        remainingHours -= hoursToAdd;
+        
+        if (current.getHours() === 12) {
+            current.setHours(13, 0, 0, 0);
+        }
+    }
+    
+    return current;
+}
+
+function formatDateTime(date) {
+    const d = new Date(date);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatDate(date) {
+    const d = new Date(date);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+let ganttZoomLevel = 1;
+let ganttScrollPosition = 0;
+let ganttTimeContext = null;
+
+function refreshGanttHorizontalControls() {
+    const scrollContainer = document.getElementById('ganttScrollContainer');
+    if (!scrollContainer) return;
+    const bottomScroll = document.getElementById('ganttBottomScroll');
+    const bottomScrollInner = bottomScroll ? bottomScroll.querySelector('.gantt-bottom-scroll-inner') : null;
+    const bottomSlider = document.getElementById('ganttBottomSlider');
+
+    const totalDays = parseFloat(scrollContainer.dataset.totalDays || '0') || 0;
+    // 内容总宽度 = 时间轴宽度（含border补偿，左侧350px冻结列不参与水平滚动计算）
+    const contentWidth = totalDays * 41;
+    const viewWidth = scrollContainer.clientWidth - 350; // 视口宽度减去冻结列
+    const max = Math.max(0, Math.round(contentWidth - viewWidth));
+
+    if (bottomScrollInner && contentWidth > 0) {
+        bottomScrollInner.style.width = `${Math.ceil(contentWidth)}px`;
+    }
+    if (bottomScroll) {
+        bottomScroll.scrollLeft = scrollContainer.scrollLeft;
+    }
+    if (bottomSlider) {
+        bottomSlider.max = String(max);
+        bottomSlider.value = String(Math.max(0, Math.min(max, scrollContainer.scrollLeft)));
+        bottomSlider.disabled = max <= 0;
+    }
+}
+
+function renderGanttTree(scheduleData) {
+    const tree = document.getElementById('ganttTree');
+    
+    if (!scheduleData.trains || scheduleData.trains.length === 0) {
+        tree.innerHTML = `
+            <div class="empty-state">
+                <h3>暂无排程数据</h3>
+                <p>请先生成排程</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // 更新班组筛选下拉框
+    updateTeamFilter(scheduleData);
+    
+    // 计算实际时间范围（必须覆盖：列车/阶段/SBOP 的起止时间，即使该 SBOP 没有工单）
+    let minTime = Infinity;
+    let maxTime = -Infinity;
+
+    scheduleData.trains.forEach(train => {
+        if (train.start_time) {
+            const t = new Date(train.start_time).getTime();
+            if (t < minTime) minTime = t;
+        }
+        if (train.end_time) {
+            const t = new Date(train.end_time).getTime();
+            if (t > maxTime) maxTime = t;
+        }
+        if (train.phases) {
+            train.phases.forEach(phase => {
+                if (phase.start_time) {
+                    const t = new Date(phase.start_time).getTime();
+                    if (t < minTime) minTime = t;
+                }
+                if (phase.end_time) {
+                    const t = new Date(phase.end_time).getTime();
+                    if (t > maxTime) maxTime = t;
+                }
+                if (phase.sbops) {
+                    phase.sbops.forEach(sbop => {
+                        if (sbop.start_time) {
+                            const t = new Date(sbop.start_time).getTime();
+                            if (t < minTime) minTime = t;
+                        }
+                        if (sbop.end_time) {
+                            const t = new Date(sbop.end_time).getTime();
+                            if (t > maxTime) maxTime = t;
+                        }
+                        if (sbop.orders) {
+                            sbop.orders.forEach(order => {
+                                const startTime = order.start_time.getTime();
+                                const endTime = order.end_time.getTime();
+                                if (startTime < minTime) minTime = startTime;
+                                if (endTime > maxTime) maxTime = endTime;
+                            });
+                        }
+                    });
+                }
+            });
+        }
+    });
+
+    if (scheduleData.totalStartTime) {
+        const t = new Date(scheduleData.totalStartTime).getTime();
+        if (t < minTime) minTime = t;
+    }
+    if (scheduleData.totalEndTime) {
+        const t = new Date(scheduleData.totalEndTime).getTime();
+        if (t > maxTime) maxTime = t;
+    }
+    
+    if (minTime === Infinity) {
+        const startTimeStr = document.getElementById('startTime').value;
+        const startTime = new Date(startTimeStr);
+        minTime = startTime.getTime();
+        maxTime = minTime + 8 * 60 * 60 * 1000;
+    }
+    
+    if (maxTime === -Infinity) {
+        maxTime = minTime + 8 * 60 * 60 * 1000;
+    }
+    
+    // 按周/天对齐并确保固定视窗（至少 6 周），以便底部滚动条可左右拖动查看日期
+    const rawMinDate = new Date(minTime);
+    rawMinDate.setHours(0, 0, 0, 0);
+    const rawMaxDate = new Date(maxTime);
+    rawMaxDate.setHours(0, 0, 0, 0);
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const minDate = new Date(rawMinDate);
+    const minIsoDow = (minDate.getDay() + 6) % 7;
+    minDate.setDate(minDate.getDate() - minIsoDow);
+    const maxDate = new Date(rawMaxDate);
+    const maxIsoDow = (maxDate.getDay() + 6) % 7;
+    maxDate.setDate(maxDate.getDate() + (6 - maxIsoDow));
+    const minTotalDays = 42;
+    let totalDays = Math.round((maxDate - minDate) / msPerDay) + 1;
+    if (totalDays < minTotalDays) {
+        totalDays = minTotalDays;
+        maxDate.setTime(minDate.getTime() + (totalDays - 1) * msPerDay);
+    }
+    const totalHours = (maxTime - minTime) / (1000 * 60 * 60);
+    ganttTimeContext = { minDate: new Date(minDate), totalDays, msPerDay };
+    
+    const infoDiv = document.getElementById('ganttInfo');
+    if (scheduleData.totalStartTime && scheduleData.totalEndTime) {
+        infoDiv.innerHTML = `
+            总时长: ${scheduleData.totalDuration.toFixed(1)} 小时 | 
+            开始: ${formatDateTime(new Date(scheduleData.totalStartTime))} | 
+            结束: ${formatDateTime(new Date(scheduleData.totalEndTime))}
+        `;
+    }
+    
+    // 颜色配置 - 按照用户要求设置不同层级的颜色
+    const colors = {
+        train: { bg: '#10b981', text: '#ffffff' },      // 绿色
+        phase: { bg: '#3b82f6', text: '#ffffff' },      // 蓝色
+        sbop: { bg: '#92400e', text: '#ffffff' },       // 棕色
+        order: { bg: '#8b5cf6', text: '#ffffff' }       // 紫色
+    };
+    
+    // 计算图表总宽度（基于缩放级别）
+    // 关键修复1：确保每个日期格子最小有足够宽度(例如40px)，总宽度随天数线性增长，打破原本1200px的限制
+    const minDayWidth = 40; 
+    const baseWidth = Math.max(totalDays * minDayWidth, 1200);
+    const viewportWidth = tree ? Math.round(tree.getBoundingClientRect().width) : 0;
+    let chartWidth = baseWidth * ganttZoomLevel;
+    if (totalDays > 30 && viewportWidth > 0) {
+        chartWidth = Math.max(chartWidth, viewportWidth + 200);
+    }
+    
+    // 设置CSS变量以支持背景网格
+    tree.style.setProperty('--total-days', totalDays);
+    
+    // ===== 冻结窗格模式（Excel-like Freeze Panes）=====
+    // 左侧结构数据列固定，右侧时间轴可水平滚动
+
+    const today0 = new Date();
+    today0.setHours(0, 0, 0, 0);
+    const weekStart = new Date(today0);
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const todayIndex = Math.round((today0.getTime() - minDate.getTime()) / msPerDay);
+    const weekStartIndex = Math.round((weekStart.getTime() - minDate.getTime()) / msPerDay);
+
+    // 时间轴刻度HTML（周/日/星期）
+    let timeScaleHtml = '';
+    const weekdayLetters = ['日', '一', '二', '三', '四', '五', '六'];
+    const totalWeeks = Math.ceil(totalDays / 7);
+
+    // 周行
+    timeScaleHtml += '<div style="display:flex;width:100%;min-width:' + (totalDays * 40) + 'px;">';
+    for (let w = 0; w < totalWeeks; w++) {
+        const startI = w * 7;
+        const endI = Math.min(totalDays - 1, startI + 6);
+        const cw = (endI - startI + 1) * 40;
+        timeScaleHtml += '<div style="flex:0 0 ' + cw + 'px;height:20px;line-height:20px;font-size:12px;font-weight:700;text-align:center;color:#333;border-right:1px solid #e9ecef;background:white;">第' + (w+1) + '周</div>';
+    }
+    timeScaleHtml += '</div>';
+
+    // 日期行
+    timeScaleHtml += '<div style="display:flex;width:100%;min-width:' + (totalDays * 40) + 'px;">';
+    for (let i = 0; i < totalDays; i++) {
+        const dayDate = new Date(minDate);
+        dayDate.setDate(dayDate.getDate() + i);
+        const isToday = i === todayIndex;
+        timeScaleHtml += '<div style="flex:0 0 40px;height:22px;line-height:22px;font-size:12px;text-align:center;color:' + (isToday ? '#dc2626' : '#333') + ';border-right:1px solid #e9ecef;background:' + (isToday ? '#fff5f5' : 'white') + ';">' + dayDate.getDate() + '</div>';
+    }
+    timeScaleHtml += '</div>';
+
+    // 星期行
+    timeScaleHtml += '<div style="display:flex;width:100%;min-width:' + (totalDays * 40) + 'px;">';
+    for (let i = 0; i < totalDays; i++) {
+        const dayDate = new Date(minDate);
+        dayDate.setDate(dayDate.getDate() + i);
+        const isToday = i === todayIndex;
+        timeScaleHtml += '<div style="flex:0 0 40px;height:22px;line-height:22px;font-size:12px;font-weight:700;text-align:center;color:' + (isToday ? '#dc2626' : '#333') + ';border-right:1px solid #e9ecef;background:#f8f9fa;">' + weekdayLetters[dayDate.getDay()] + '</div>';
+    }
+    timeScaleHtml += '</div>';
+
+    let html = `
+        <div class="gantt-time-header">
+            <div class="time-info"><strong>开始时间:</strong> ${formatDateTime(new Date(minTime))}</div>
+            <div class="time-info"><strong>结束时间:</strong> ${formatDateTime(new Date(maxTime))}</div>
+            <div class="time-info"><strong>总时长:</strong> ${totalHours.toFixed(1)} 小时 (${totalDays} 天)</div>
+        </div>
+        <div class="gantt-zoom-controls">
+            <button class="btn btn-sm" onclick="zoomGantt(0.8)">缩小</button>
+            <span class="zoom-level">${(ganttZoomLevel * 100).toFixed(0)}%</span>
+            <button class="btn btn-sm" onclick="zoomGantt(1.25)">放大</button>
+            <button class="btn btn-sm" onclick="resetGanttZoom()">重置</button>
+        </div>
+        <div class="gantt-scroll-container" id="ganttScrollContainer" style="max-height:65vh;" data-total-days="${totalDays}">
+            <!-- 内容包裹层（固定宽度 = 左侧冻结列(350px) + 右侧时间轴(totalDays*40px + border补偿)） -->
+            <div class="gantt-chart-wrapper" style="width:${350 + totalDays * 41}px;">
+            <!-- ====== 表头行：冻结窗格 ====== -->
+            <div class="gantt-freeze-header-row">
+                <div class="gantt-freeze-header-cell">结构化数据</div>
+                <div class="gantt-freeze-time-area" id="headerTimeArea">${timeScaleHtml}</div>
+            </div>
+    `;
+    // ===== 数据行渲染：冻结窗格布局 =====
+    scheduleData.trains.forEach((train, trainIndex) => {
+        const trainPos = {
+            left: Math.round((new Date(train.start_time).setHours(0,0,0,0) - minDate.getTime()) / msPerDay),
+            width: Math.round((new Date(train.end_time).setHours(0,0,0,0) - new Date(train.start_time).setHours(0,0,0,0)) / msPerDay) + 1,
+            days: Math.round((new Date(train.end_time).setHours(0,0,0,0) - new Date(train.start_time).setHours(0,0,0,0)) / msPerDay) + 1
+        };
+
+        html += `
+            <div class="gantt-freeze-data-row gantt-level-1" data-gantt-level="1">
+                <div class="gantt-freeze-data-cell" onclick="toggleFreezeRow(this)" data-expanded="true">
+                    <div class="gantt-toggle expanded">−</div>
+                    <div style="display:flex;align-items:center;gap:8px;flex:1;overflow:hidden;">
+                        <span class="row-number">${trainIndex + 1}</span>
+                        <span class="row-name">列车号: ${train.number}</span>
+                        <span class="row-duration">${trainPos.days}天</span>
+                    </div>
+                </div>
+                <div class="gantt-freeze-bar-cell" data-row-type="train" data-train="${trainIndex}"
+                     style="--total-days:${totalDays};min-width:${totalDays * 41}px;">
+                    <div class="gantt-freeze-scroll-spacer" style="width:${totalDays * 41}px;height:0;flex-shrink:0;pointer-events:none;"></div>
+                    <div class="gantt-row-bar" data-type="train" data-train="${trainIndex}"
+                         style="position:absolute;left:${trainPos.left * 40}px;width:${Math.max(trainPos.width * 40, 4)}px;height:28px;top:4px;background-color:${colors.train.bg};color:${colors.train.text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                        ${trainPos.days}天
+                    </div>
+                </div>
+            </div>
+            <div class="gantt-children-container" id="children_${trainIndex}">
+        `;
+
+        if (train.phases) {
+            train.phases.forEach((phase, phaseIndex) => {
+                const phasePos = {
+                    left: Math.round((new Date(phase.start_time).setHours(0,0,0,0) - minDate.getTime()) / msPerDay),
+                    width: Math.round((new Date(phase.end_time).setHours(0,0,0,0) - new Date(phase.start_time).setHours(0,0,0,0)) / msPerDay) + 1,
+                    days: Math.round((new Date(phase.end_time).setHours(0,0,0,0) - new Date(phase.start_time).setHours(0,0,0,0)) / msPerDay) + 1
+                };
+
+                html += `
+                    <div class="gantt-freeze-data-row gantt-level-2" data-gantt-level="2">
+                        <div class="gantt-freeze-data-cell" onclick="toggleFreezeRow(this)" data-expanded="true">
+                            <div class="gantt-toggle expanded">−</div>
+                            <div style="display:flex;align-items:center;gap:8px;flex:1;overflow:hidden;">
+                                <span class="row-number">${trainIndex + 1}.${phaseIndex + 1}</span>
+                                <span class="row-name">${phase.name}</span>
+                                <span class="row-duration">${phasePos.days}天</span>
+                            </div>
+                        </div>
+                        <div class="gantt-freeze-bar-cell" data-row-type="phase" data-train="${trainIndex}" data-phase="${phaseIndex}"
+                             style="--total-days:${totalDays};min-width:${totalDays * 41}px;">
+                            <div class="gantt-freeze-scroll-spacer" style="width:${totalDays * 41}px;height:0;flex-shrink:0;pointer-events:none;"></div>
+                            <div class="gantt-row-bar" data-type="phase" data-train="${trainIndex}" data-phase="${phaseIndex}"
+                                 style="position:absolute;left:${phasePos.left * 40}px;width:${Math.max(phasePos.width * 40, 4)}px;height:28px;top:4px;background-color:${colors.phase.bg};color:${colors.phase.text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                                ${phasePos.days}天
+                            </div>
+                        </div>
+                    </div>
+                    <div class="gantt-children-container" id="children_${trainIndex}_${phaseIndex}">
+                `;
+
+                if (phase.sbops) {
+                    phase.sbops.forEach((sbop, sbopIndex) => {
+                        const sbopPos = {
+                            left: Math.round((new Date(sbop.start_time).setHours(0,0,0,0) - minDate.getTime()) / msPerDay),
+                            width: Math.round((new Date(sbop.end_time).setHours(0,0,0,0) - new Date(sbop.start_time).setHours(0,0,0,0)) / msPerDay) + 1,
+                            days: Math.round((new Date(sbop.end_time).setHours(0,0,0,0) - new Date(sbop.start_time).setHours(0,0,0,0)) / msPerDay) + 1
+                        };
+
+                        html += `
+                            <div class="gantt-freeze-data-row gantt-level-3" data-gantt-level="3">
+                                <div class="gantt-freeze-data-cell" onclick="toggleFreezeRow(this)" data-expanded="true">
+                                    <div class="gantt-toggle expanded">−</div>
+                                    <div style="display:flex;align-items:center;gap:8px;flex:1;overflow:hidden;">
+                                        <span class="row-number">${trainIndex + 1}.${phaseIndex + 1}.${sbopIndex + 1}</span>
+                                        <span class="row-name">${sbop.name}</span>
+                                        <span class="row-duration">${sbopPos.days}天</span>
+                                    </div>
+                                </div>
+                                <div class="gantt-freeze-bar-cell gantt-order-dropzone"
+                                     data-row-type="sbop"
+                                     data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}"
+                                     style="--total-days:${totalDays};">
+                                    <div class="gantt-row-bar" data-type="sbop"
+                                         data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}"
+                                         data-train="${trainIndex}" data-phase="${phaseIndex}" data-sbop='${JSON.stringify({id: sbop.id, team: sbop.team})}'
+                                         style="position:absolute;left:${sbopPos.left * 40}px;width:${Math.max(sbopPos.width * 40, 4)}px;height:28px;top:4px;background-color:${colors.sbop.bg};color:${colors.sbop.text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;box-shadow:0 2px 4px rgba(0,0,0,0.1);cursor:pointer;">
+                                        ${sbopPos.days}天
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="gantt-children-container" id="children_${trainIndex}_${phaseIndex}_${sbopIndex}">
+                        `;
+
+                        // 工单层级
+                        if (sbop.orders) {
+                            sbop.orders.forEach((order, orderIndex) => {
+                                const orderPos = {
+                                    left: Math.round((new Date(order.start_time).setHours(0,0,0,0) - minDate.getTime()) / msPerDay),
+                                    width: Math.round((new Date(order.end_time).setHours(0,0,0,0) - new Date(order.start_time).setHours(0,0,0,0)) / msPerDay) + 1,
+                                    days: Math.round((new Date(order.end_time).setHours(0,0,0,0) - new Date(order.start_time).setHours(0,0,0,0)) / msPerDay) + 1
+                                };
+
+                                html += `
+                                    <div class="gantt-freeze-data-row gantt-level-4 gantt-order-row" draggable="false"
+                                         data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}" data-order-index="${orderIndex}">
+                                        <div class="gantt-freeze-data-cell">
+                                            <div class="gantt-toggle" style="visibility:hidden;">+</div>
+                                            <div style="display:flex;align-items:center;gap:8px;flex:1;overflow:hidden;">
+                                                <span class="row-number">${trainIndex + 1}.${phaseIndex + 1}.${sbopIndex + 1}.${orderIndex + 1}</span>
+                                                <span class="row-name">${order.name}</span>
+                                                <span class="row-duration">${orderPos.days}天 (${order.duration}小时/${order.workerCount}人)</span>
+                                            </div>
+                                        </div>
+                                        <div class="gantt-freeze-bar-cell gantt-order-dropzone"
+                                             data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}"
+                                             style="--total-days:${totalDays};min-width:${totalDays * 41}px;">
+                                            <div class="gantt-freeze-scroll-spacer" style="width:${totalDays * 41}px;height:0;flex-shrink:0;pointer-events:none;"></div>
+                                            <div class="gantt-row-bar gantt-order-bar" data-type="order" draggable="false"
+                                                 data-train-index="${trainIndex}" data-phase-index="${phaseIndex}" data-sbop-index="${sbopIndex}" data-order-index="${orderIndex}"
+                                                 style="position:absolute;left:${orderPos.left * 40}px;width:${Math.max(orderPos.width * 40, 4)}px;height:28px;top:4px;background-color:${colors.order.bg};color:${colors.order.text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;box-shadow:0 2px 4px rgba(0,0,0,0.1);cursor:pointer;">
+                                                ${orderPos.days}天
+                                            </div>
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                        }
+
+                        html += `</div>`;
+                    });
+                }
+
+                html += `</div>`;
+            });
+        }
+
+        html += `</div>`;
+    });
+
+    // ===== 结束标签 =====
+    html += `
+            </div>
+            </div><!-- /gantt-chart-wrapper -->
+            <!-- 同步滚动条 -->
+            <div class="gantt-sync-scrollbar" id="ganttBottomScroll">
+                <div class="gantt-bottom-scroll-inner" style="width:${totalDays * 41}px;height:1px;"></div>
+            </div>
+        </div><!-- /ganttScrollContainer -->
+    `;
+    tree.innerHTML = html;
+
+    // ===== 单一容器滚动模式：底部滚动条联动 =====
+    const scrollContainer = document.getElementById('ganttScrollContainer');
+    const bottomScroll = document.getElementById('ganttBottomScroll');
+
+    if (scrollContainer) {
+        // 自动定位到今天/当前周
+        if (!ganttAutoScrollDone) {
+            const baseIndex = (weekStartIndex >= 0 && weekStartIndex < totalDays) ? weekStartIndex : todayIndex;
+            if (typeof baseIndex === 'number' && baseIndex >= 0 && baseIndex < totalDays) {
+                const target = Math.max(0, baseIndex * 40 - 200);
+                scrollContainer.scrollLeft = target;
+            }
+            ganttAutoScrollDone = true;
+        } else if (ganttScrollPosition > 0) {
+            scrollContainer.scrollLeft = ganttScrollPosition;
+        }
+    }
+
+    // 底部同步滚动条：双向联动单一容器的scrollLeft
+    let syncing = false;
+    const syncWithContainer = (leftVal) => {
+        if (syncing) return;
+        syncing = true;
+        if (scrollContainer) scrollContainer.scrollLeft = leftVal;
+        if (bottomScroll) bottomScroll.scrollLeft = leftVal;
+        syncing = false;
+    };
+
+    // 容器滚动时同步底部滚动条
+    if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', () => {
+            if (!syncing && bottomScroll) bottomScroll.scrollLeft = scrollContainer.scrollLeft;
+        }, { passive: true });
+    }
+    // 底部滚动条拖动时同步容器
+    if (bottomScroll) {
+        bottomScroll.addEventListener('scroll', () => syncWithContainer(bottomScroll.scrollLeft), { passive: true });
+    }
+
+    // 窗口resize时刷新
+    window.removeEventListener('resizeGantt', refreshGanttHorizontalControls);
+    window.addEventListener('resizeGantt', () => requestAnimationFrame(refreshGanttHorizontalControls), { passive: true });
+
+    // 刷新控件状态
+    requestAnimationFrame(refreshGanttHorizontalControls);
+    setTimeout(refreshGanttHorizontalControls, 100);
+
+    // 重新绑定拖拽事件
+    bindGanttOrderDragDrop();
+}
+
+// ===== 冻结窗格专用：展开/折叠行 =====
+function toggleFreezeRow(cell) {
+    const row = cell.closest('.gantt-freeze-data-row');
+    if (!row) return;
+    const toggle = cell.querySelector('.gantt-toggle');
+    const isExpanded = cell.getAttribute('data-expanded') === 'true';
+
+    // 找到对应的 children-container
+    const level = row.getAttribute('data-gantt-level') || row.className.match(/gantt-level-(\d+)/)?.[1];
+    let containerId = '';
+    if (level === '1') {
+        containerId = 'children_' + row.querySelector('[data-train]')?.getAttribute('data-train');
+    } else if (level === '2') {
+        const tr = row.querySelector('[data-train]');
+        const ph = row.querySelector('[data-phase]');
+        if (tr && ph) containerId = 'children_' + tr.getAttribute('data-train') + '_' + ph.getAttribute('data-phase');
+    } else if (level === '3') {
+        const tr = row.querySelector('[data-train-index]');
+        const ph = row.querySelector('[data-phase-index]');
+        const sb = row.querySelector('[data-sbop-index]');
+        if (tr && ph && sb) containerId = 'children_' + tr.getAttribute('data-train-index') + '_' + ph.getAttribute('data-phase-index') + '_' + sb.getAttribute('data-sbop-index');
+    }
+
+    const container = containerId ? document.getElementById(containerId) : row.nextElementSibling;
+
+    if (isExpanded) {
+        // 折叠
+        cell.setAttribute('data-expanded', 'false');
+        if (toggle) { toggle.textContent = '+'; toggle.classList.remove('expanded'); toggle.classList.add('collapsed'); }
+        if (container) container.style.display = 'none';
+    } else {
+        // 展开
+        cell.setAttribute('data-expanded', 'true');
+        if (toggle) { toggle.textContent = '\u2212'; toggle.classList.add('expanded'); toggle.classList.remove('collapsed'); }
+        if (container) container.style.display = '';
+    }
+}
+
+function expandAllGantt() {
+    document.querySelectorAll('.gantt-freeze-data-cell[data-expanded="false"]').forEach(cell => toggleFreezeRow(cell));
+}
+
+function collapseAllGantt() {
+    document.querySelectorAll('.gantt-freeze-data-cell[data-expanded="true"]').forEach(cell => toggleFreezeRow(cell));
+}
+
+function zoomGantt(factor) {
+    const scrollContainer = document.getElementById('ganttScrollContainer');
+    if (scrollContainer) {
+        ganttScrollPosition = scrollContainer.scrollLeft;
+    }
+    ganttZoomLevel *= factor;
+    ganttZoomLevel = Math.max(0.5, Math.min(ganttZoomLevel, 5));
+    renderScheduleFromPlans();
+}
+
+function resetGanttZoom() {
+    ganttZoomLevel = 1;
+    ganttScrollPosition = 0;
+    renderScheduleFromPlans();
+}
+
+function setTrainOrderOverride(trainNumber, phaseId, sbopId, orderIds) {
+    const plan = trainPlans.find(p => p && p.number === trainNumber);
+    if (!plan) return;
+    if (!plan.orderOverrides || typeof plan.orderOverrides !== 'object') {
+        plan.orderOverrides = {};
+    }
+    const key = `${phaseId}:${sbopId}`;
+    plan.orderOverrides[key] = orderIds;
+    saveTrainPlans();
+    renderScheduleFromPlans();
+}
+
+function setTrainSbopStartOverride(trainNumber, phaseId, sbopId, startDayOffset) {
+    const plan = trainPlans.find(p => p && p.number === trainNumber);
+    if (!plan) return;
+    if (!plan.sbopStartOverrides || typeof plan.sbopStartOverrides !== 'object') {
+        plan.sbopStartOverrides = {};
+    }
+    const v = parseInt(startDayOffset, 10);
+    if (!Number.isFinite(v) || v < 1) return;
+    const key = `${phaseId}:${sbopId}`;
+    plan.sbopStartOverrides[key] = v;
+    saveTrainPlans();
+    renderScheduleFromPlans();
+}
+
+function setTrainOrderDayOverride(trainNumber, phaseId, sbopId, orderId, dayOffset) {
+    const plan = trainPlans.find(p => p && p.number === trainNumber);
+    if (!plan) return;
+    if (!plan.orderDayOverrides || typeof plan.orderDayOverrides !== 'object') {
+        plan.orderDayOverrides = {};
+    }
+    const key = `${phaseId}:${sbopId}`;
+    const map = (plan.orderDayOverrides[key] && typeof plan.orderDayOverrides[key] === 'object') ? plan.orderDayOverrides[key] : {};
+    const id = (orderId || '').toString();
+    const v = parseInt(dayOffset, 10);
+    if (!id) return;
+    if (!Number.isFinite(v) || v < 0) return;
+    map[id] = v;
+    plan.orderDayOverrides[key] = map;
+    saveTrainPlans();
+    renderScheduleFromPlans();
+}
+
+function bindGanttShiftClicks() {
+    if (ganttClickBound) return;
+    const tree = document.getElementById('ganttTree');
+    if (!tree) return;
+    ganttClickBound = true;
+
+    const day0ms = (d) => {
+        const x = new Date(d);
+        x.setHours(0, 0, 0, 0);
+        return x.getTime();
+    };
+
+    const showShiftModal = (title, maxDays, onApply) => {
+        const max = Math.max(1, parseInt(maxDays, 10) || 1);
+        document.getElementById('modalTitle').textContent = title;
+        document.getElementById('modalBody').innerHTML = `
+            <div class="form-group">
+                <label>调整方向：</label>
+                <div style="display:flex; gap:12px; margin-top:6px;">
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        <input type="radio" name="shiftDir" value="prev" checked> 前移
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        <input type="radio" name="shiftDir" value="next"> 后置
+                    </label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>天数（1-${max}）：</label>
+                <input type="number" id="shiftDaysInput" min="1" max="${max}" value="1">
+            </div>
+            <div class="button-group">
+                <button id="shiftApplyBtn" class="btn btn-primary">确定</button>
+                <button id="shiftCancelBtn" class="btn">取消</button>
+            </div>
+        `;
+        openModal();
+        const cancelBtn = document.getElementById('shiftCancelBtn');
+        if (cancelBtn) cancelBtn.onclick = closeModal;
+        const applyBtn = document.getElementById('shiftApplyBtn');
+        if (applyBtn) {
+            applyBtn.onclick = () => {
+                const dir = document.querySelector('input[name="shiftDir"]:checked')?.value || 'prev';
+                const days = parseInt(document.getElementById('shiftDaysInput')?.value || '0', 10);
+                if (!Number.isFinite(days) || days <= 0) return;
+                const delta = (dir === 'prev') ? -days : days;
+                onApply(delta);
+            };
+        }
+    };
+
+    tree.addEventListener('click', (e) => {
+        const orderBar = e.target.closest && e.target.closest('.gantt-order-bar[data-type="order"]');
+        if (orderBar) {
+            if (!hasPermission('plan:edit')) return;
+            const trainIndex = parseInt(orderBar.dataset.trainIndex, 10);
+            const phaseIndex = parseInt(orderBar.dataset.phaseIndex, 10);
+            const sbopIndex = parseInt(orderBar.dataset.sbopIndex, 10);
+            const orderIndex = parseInt(orderBar.dataset.orderIndex, 10);
+            if ([trainIndex, phaseIndex, sbopIndex, orderIndex].some(n => Number.isNaN(n))) return;
+            const scheduleData = currentScheduleData;
+            const train = scheduleData && scheduleData.trains && scheduleData.trains[trainIndex];
+            const phase = train && train.phases && train.phases[phaseIndex];
+            const sbop = phase && phase.sbops && phase.sbops[sbopIndex];
+            const order = sbop && sbop.orders && sbop.orders[orderIndex];
+            if (!sbop || !order) return;
+
+            const msPerDay = 1000 * 60 * 60 * 24;
+            const sbopDays = Math.max(1, Math.round((day0ms(sbop.end_time) - day0ms(sbop.start_time)) / msPerDay) + 1);
+            const currentDayOffset = Math.max(0, Math.min(sbopDays - 1, Math.round((day0ms(order.start_time) - day0ms(sbop.start_time)) / msPerDay)));
+
+            showShiftModal(`调整工单：${order.name}`, sbopDays - 1, (deltaDays) => {
+                const targetDayOffset = Math.max(0, Math.min(sbopDays - 1, currentDayOffset + deltaDays));
+                closeModal();
+                setTrainOrderDayOverride(train.number, phase.id, sbop.id, order.id, targetDayOffset);
+            });
+            return;
+        }
+
+        const sbopBar = e.target.closest && e.target.closest('.gantt-row-bar[data-type="sbop"]');
+        if (sbopBar) {
+            if (!hasPermission('plan:edit')) return;
+            const trainIndex = parseInt(sbopBar.dataset.trainIndex, 10);
+            const phaseIndex = parseInt(sbopBar.dataset.phaseIndex, 10);
+            const sbopIndex = parseInt(sbopBar.dataset.sbopIndex, 10);
+            if ([trainIndex, phaseIndex, sbopIndex].some(n => Number.isNaN(n))) return;
+            const scheduleData = currentScheduleData;
+            const train = scheduleData && scheduleData.trains && scheduleData.trains[trainIndex];
+            const phase = train && train.phases && train.phases[phaseIndex];
+            const sbop = phase && phase.sbops && phase.sbops[sbopIndex];
+            if (!phase || !sbop) return;
+
+            const msPerDay = 1000 * 60 * 60 * 24;
+            const phaseDays = Math.max(1, Math.round((day0ms(phase.end_time) - day0ms(phase.start_time)) / msPerDay) + 1);
+            const sbopDays = Math.max(1, Math.round((day0ms(sbop.end_time) - day0ms(sbop.start_time)) / msPerDay) + 1);
+            const maxStartOffset = Math.max(0, phaseDays - sbopDays);
+            const currentStartOffset = Math.max(0, Math.min(maxStartOffset, Math.round((day0ms(sbop.start_time) - day0ms(phase.start_time)) / msPerDay)));
+
+            showShiftModal(`调整SBOP：${sbop.name}`, phaseDays - 1, (deltaDays) => {
+                const targetOffset = Math.max(0, Math.min(maxStartOffset, currentStartOffset + deltaDays));
+                closeModal();
+                setTrainSbopStartOverride(train.number, phase.id, sbop.id, targetOffset + 1);
+            });
+        }
+    });
+}
+
+function clearDragClasses(tree) {
+    const dragging = tree.querySelector('.gantt-order-bar.dragging');
+    if (dragging) dragging.classList.remove('dragging');
+    tree.querySelectorAll('.gantt-order-dropzone.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+
+function bindGanttOrderDragDrop() {
+    if (ganttDndBound) return;
+    const tree = document.getElementById('ganttTree');
+    if (!tree) return;
+    ganttDndBound = true;
+
+    tree.addEventListener('dragstart', (e) => {
+        if (!hasPermission('plan:edit')) {
+            e.preventDefault();
+            return;
+        }
+        const bar = e.target.closest && e.target.closest('.gantt-order-bar[data-type="order"]');
+        if (!bar) return;
+        const trainIndex = parseInt(bar.dataset.trainIndex, 10);
+        const phaseIndex = parseInt(bar.dataset.phaseIndex, 10);
+        const sbopIndex = parseInt(bar.dataset.sbopIndex, 10);
+        const orderIndex = parseInt(bar.dataset.orderIndex, 10);
+        if ([trainIndex, phaseIndex, sbopIndex, orderIndex].some(n => Number.isNaN(n))) return;
+
+        draggedOrderInfo = { trainIndex, phaseIndex, sbopIndex, orderIndex };
+        bar.classList.add('dragging');
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', `${trainIndex}:${phaseIndex}:${sbopIndex}:${orderIndex}`);
+        }
+    });
+
+    tree.addEventListener('dragover', (e) => {
+        if (!draggedOrderInfo) return;
+        const zone = e.target.closest && e.target.closest('.gantt-order-dropzone');
+        if (!zone) return;
+        const trainIndex = parseInt(zone.dataset.trainIndex, 10);
+        const phaseIndex = parseInt(zone.dataset.phaseIndex, 10);
+        const sbopIndex = parseInt(zone.dataset.sbopIndex, 10);
+        if (Number.isNaN(trainIndex) || Number.isNaN(phaseIndex) || Number.isNaN(sbopIndex)) return;
+        if (trainIndex !== draggedOrderInfo.trainIndex || phaseIndex !== draggedOrderInfo.phaseIndex || sbopIndex !== draggedOrderInfo.sbopIndex) return;
+        e.preventDefault();
+        clearDragClasses(tree);
+        zone.classList.add('drag-over');
+    });
+
+    tree.addEventListener('drop', (e) => {
+        if (!draggedOrderInfo) return;
+        const zone = e.target.closest && e.target.closest('.gantt-order-dropzone');
+        if (!zone) return;
+        const trainIndex = parseInt(zone.dataset.trainIndex, 10);
+        const phaseIndex = parseInt(zone.dataset.phaseIndex, 10);
+        const sbopIndex = parseInt(zone.dataset.sbopIndex, 10);
+        if ([trainIndex, phaseIndex, sbopIndex].some(n => Number.isNaN(n))) return;
+        if (trainIndex !== draggedOrderInfo.trainIndex || phaseIndex !== draggedOrderInfo.phaseIndex || sbopIndex !== draggedOrderInfo.sbopIndex) return;
+        e.preventDefault();
+
+        const scheduleData = currentScheduleData;
+        if (!scheduleData || !scheduleData.trains || !scheduleData.trains[trainIndex]) return;
+        const train = scheduleData.trains[trainIndex];
+        const phase = train.phases && train.phases[phaseIndex];
+        const sbop = phase && phase.sbops && phase.sbops[sbopIndex];
+        if (!sbop || !Array.isArray(sbop.orders)) return;
+
+        const fromIndex = draggedOrderInfo.orderIndex;
+        const ctx = ganttTimeContext;
+        if (!ctx || !ctx.minDate || !ctx.totalDays) return;
+
+        const rect = zone.getBoundingClientRect();
+        const x = Math.max(0, Math.min(rect.width, (e.clientX - rect.left)));
+        const dayIndexOverall = Math.min(
+            Math.max(0, Math.floor((x / Math.max(rect.width, 1)) * ctx.totalDays)),
+            ctx.totalDays - 1
+        );
+
+        const sbopStartDayIndex = Math.round((new Date(sbop.start_time).setHours(0, 0, 0, 0) - ctx.minDate.getTime()) / ctx.msPerDay);
+        const sbopEndDayIndex = Math.round((new Date(sbop.end_time).setHours(0, 0, 0, 0) - ctx.minDate.getTime()) / ctx.msPerDay);
+        const sbopDays = Math.max(1, (sbopEndDayIndex - sbopStartDayIndex) + 1);
+
+        const rawOffset = dayIndexOverall - sbopStartDayIndex;
+        const targetDayOffset = Math.max(0, Math.min(sbopDays - 1, rawOffset));
+
+        const takt = Math.max(1, parseInt(sbop.takt, 10) || 1);
+        // 不再强制对齐到节拍第一项，而是允许在当天内自由插入
+        // 这里计算该天起始位置
+        const targetBaseIndex = targetDayOffset * takt;
+        
+        // 进一步根据鼠标在当前天区块内的 X 比例，计算在这一天内多个工单中的细分插入位置
+        // 这样可以实现同1天内顺序的自由交换
+        const dayWidth = rect.width / ctx.totalDays;
+        const xInDay = x - (dayIndexOverall * dayWidth);
+        const fractionInDay = Math.max(0, Math.min(1, xInDay / dayWidth));
+        
+        // 该天原本有多少个工单
+        const ordersInTargetDay = sbop.orders.filter((o, idx) => Math.floor(idx / takt) === targetDayOffset);
+        // 根据比例计算在当天的相对插入索引
+        const relativeInsertIndex = Math.floor(fractionInDay * (ordersInTargetDay.length + 1));
+        
+        // 最终插入索引 = 该天起始索引 + 相对索引
+        let insertIndex = targetBaseIndex + relativeInsertIndex;
+
+        const orders = sbop.orders.slice();
+        const [moved] = orders.splice(fromIndex, 1);
+        if (!moved) return;
+
+        // 如果插入点在被移除项之后，由于数组少了一个元素，索引需减1
+        if (insertIndex > fromIndex) {
+            insertIndex--;
+        }
+        
+        insertIndex = Math.max(0, Math.min(orders.length, insertIndex));
+        orders.splice(insertIndex, 0, moved);
+        const orderIds = orders.map(o => o.id);
+        setTrainOrderOverride(train.number, phase.id, sbop.id, orderIds);
+        clearDragClasses(tree);
+        draggedOrderInfo = null;
+    });
+
+    tree.addEventListener('dragend', () => {
+        clearDragClasses(tree);
+        draggedOrderInfo = null;
+    });
+}
+
+function updateTeamFilter(scheduleData) {
+    const teamFilter = document.getElementById('teamFilter');
+    const filterStartDate = document.getElementById('filterStartDate');
+    const filterEndDate = document.getElementById('filterEndDate');
+    
+    if (!teamFilter) return;
+    
+    // 收集所有班组和日期范围
+    const teams = new Set();
+    let minDate = null;
+    let maxDate = null;
+    
+    scheduleData.trains.forEach(train => {
+        if (train.phases) {
+            train.phases.forEach(phase => {
+                if (phase.sbops) {
+                    phase.sbops.forEach(sbop => {
+                        if (sbop.team) {
+                            teams.add(sbop.team);
+                        }
+                        if (sbop.start_time) {
+                            const startDate = new Date(sbop.start_time);
+                            if (!minDate || startDate < minDate) minDate = startDate;
+                        }
+                        if (sbop.end_time) {
+                            const endDate = new Date(sbop.end_time);
+                            if (!maxDate || endDate > maxDate) maxDate = endDate;
+                        }
+                    });
+                }
+            });
+        }
+    });
+    
+    // 清空并重新添加班组选项
+    teamFilter.innerHTML = '<option value="all">全部班组</option>';
+    teams.forEach(team => {
+        const option = document.createElement('option');
+        option.value = team;
+        option.textContent = team;
+        teamFilter.appendChild(option);
+    });
+    
+    // 设置日期筛选范围
+    if (minDate && filterStartDate) {
+        filterStartDate.min = minDate.toISOString().split('T')[0];
+        filterStartDate.max = maxDate ? maxDate.toISOString().split('T')[0] : '';
+    }
+    if (maxDate && filterEndDate) {
+        filterEndDate.min = minDate ? minDate.toISOString().split('T')[0] : '';
+        filterEndDate.max = maxDate.toISOString().split('T')[0];
+    }
+}
+
+let lastSearchResults = [];
+
+function searchDetails() {
+    const selectedTeam = document.getElementById('teamFilter').value;
+    const filterStartDate = document.getElementById('filterStartDate').value;
+    const filterEndDate = document.getElementById('filterEndDate').value;
+    const tableBody = document.getElementById('detailsTableBody');
+    
+    // 清空当前列表并重置搜索结果
+    tableBody.innerHTML = '';
+    lastSearchResults = [];
+    
+    const trainNumberSelect = document.getElementById('trainNumberFilter');
+    const selectedTrain = trainNumberSelect ? trainNumberSelect.value : 'all';
+    const scheduleData = currentScheduleData || buildMultiTrainSchedule();
+    if (!scheduleData || !scheduleData.trains || scheduleData.trains.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="9" class="empty-text">请先添加列车排程</td></tr>';
+        return;
+    }
+    
+    // 更新筛选器
+    updateTeamFilter(scheduleData);
+
+    scheduleData.trains.forEach(train => {
+        if (selectedTrain && selectedTrain !== 'all' && train.number !== selectedTrain) {
+            return;
+        }
+      train.phases.forEach(phase => {
+        phase.sbops.forEach(sbop => {
+          // 班组筛选
+          const teamMatch = selectedTeam === 'all' || sbop.team === selectedTeam;
+          if (!teamMatch) return;
+
+          // 遍历工单，对每个工单进行时间筛选
+          sbop.orders.forEach(order => {
+            const orderStartStr = formatDate(order.start_time);
+            const orderEndStr = formatDate(order.end_time);
+
+            // 严格的时间筛选：工单必须在筛选时间段内
+            let dateMatch = true;
+            if (filterStartDate) {
+              // 工单结束时间必须在筛选开始日期之后（有交集）
+              dateMatch = dateMatch && (orderEndStr >= filterStartDate);
+            }
+            if (filterEndDate) {
+              // 工单开始时间必须在筛选结束日期之前（有交集）
+              dateMatch = dateMatch && (orderStartStr <= filterEndDate);
+            }
+
+            if (dateMatch) {
+              const rowData = {
+                trainNumber: train.number,
+                phaseName: phase.name,
+                sbopName: sbop.name,
+                team: sbop.team || '-',
+                orderName: order.name,
+                startDate: orderStartStr,
+                endDate: orderEndStr,
+                duration: order.duration,
+                workerCount: order.workerCount
+              };
+
+              lastSearchResults.push(rowData);
+
+              const tr = document.createElement('tr');
+              tr.innerHTML = `
+                <td>${rowData.trainNumber}</td>
+                <td>${rowData.phaseName}</td>
+                <td>${rowData.sbopName}</td>
+                <td>${rowData.team}</td>
+                <td>${rowData.orderName}</td>
+                <td>${rowData.startDate}</td>
+                <td>${rowData.endDate}</td>
+                <td>${rowData.duration}</td>
+                <td>${rowData.workerCount}</td>
+              `;
+              tableBody.appendChild(tr);
+            }
+          });
+        });
+      });
+    });
+    
+    if (lastSearchResults.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="9" class="empty-text">未找到符合条件的结果</td></tr>';
+    }
+}
+
+function exportDetailsToExcel() {
+    if (lastSearchResults.length === 0) {
+        alert('请先进行查询并生成明细清单！');
+        return;
+    }
+    
+    // 转换数据为 Excel 格式
+    const excelData = lastSearchResults.map(row => ({
+        '列车号': row.trainNumber,
+        '检修阶段': row.phaseName,
+        'SBOP名称': row.sbopName,
+        '班组': row.team,
+        '工单名称': row.orderName,
+        '开始日期': row.startDate,
+        '结束日期': row.endDate,
+        '工时(小时)': row.duration,
+        '人数': row.workerCount
+    }));
+    
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '明细清单');
+    
+    // 导出文件
+    const dateStr = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `明细清单_${dateStr}.xlsx`);
+}
+
+function resetFilters() {
+    const trainNumberFilter = document.getElementById('trainNumberFilter');
+    if (trainNumberFilter) trainNumberFilter.value = 'all';
+    document.getElementById('teamFilter').value = 'all';
+    document.getElementById('filterStartDate').value = '';
+    document.getElementById('filterEndDate').value = '';
+    document.getElementById('detailsTableBody').innerHTML = '<tr><td colspan="9" class="empty-text">请选择条件后点击“查询明细”</td></tr>';
+    lastSearchResults = [];
+}
+
+function toggleGanttRow(header) {
+    const toggle = header.querySelector('.gantt-toggle');
+    const row = header.closest('.gantt-row');
+    const children = row.nextElementSibling;
+    
+    if (toggle.style.visibility === 'hidden') {
+        return;
+    }
+    
+    if (children && children.classList.contains('gantt-children-container')) {
+        if (children.style.display !== 'none' && children.style.maxHeight === 'none') {
+            children.style.maxHeight = children.scrollHeight + 'px';
+            setTimeout(() => {
+                children.classList.add('collapsed');
+                children.style.maxHeight = '0';
+                setTimeout(() => {
+                    if (children.classList.contains('collapsed')) {
+                        children.style.display = 'none';
+                    }
+                }, 300);
+            }, 10);
+            toggle.classList.remove('expanded');
+            toggle.classList.add('collapsed');
+            toggle.textContent = '+';
+        } else {
+            children.style.display = 'block';
+            children.classList.remove('collapsed');
+            children.style.maxHeight = children.scrollHeight + 'px';
+            setTimeout(() => {
+                children.style.maxHeight = 'none';
+            }, 300);
+            toggle.classList.remove('collapsed');
+            toggle.classList.add('expanded');
+            toggle.textContent = '−';
+        }
+    }
+}
+
+function expandAllGantt() {
+    document.querySelectorAll('.gantt-row').forEach(row => row.style.display = 'flex');
+    document.querySelectorAll('.gantt-children-container').forEach(children => {
+        children.style.display = 'block';
+        children.classList.remove('collapsed');
+        children.style.maxHeight = 'none';
+    });
+    document.querySelectorAll('.gantt-toggle').forEach(toggle => {
+        if (toggle.style.visibility !== 'hidden') {
+            toggle.classList.remove('collapsed');
+            toggle.classList.add('expanded');
+            toggle.textContent = '−';
+        }
+    });
+}
+
+function collapseAllGantt() {
+    document.querySelectorAll('.gantt-children-container').forEach(children => {
+        children.classList.add('collapsed');
+        children.style.maxHeight = '0';
+        setTimeout(() => {
+            if (children.classList.contains('collapsed')) {
+                children.style.display = 'none';
+            }
+        }, 300);
+    });
+    document.querySelectorAll('.gantt-toggle').forEach(toggle => {
+        if (toggle.style.visibility !== 'hidden') {
+            toggle.classList.remove('expanded');
+            toggle.classList.add('collapsed');
+            toggle.textContent = '+';
+        }
+    });
+}
+
+
+
+function renderDataTree() {
+    const container = document.getElementById('dataTree');
+    
+    if (!templateData || templateData.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>暂无模板数据</h3>
+                <p>请在下方添加检修阶段或在上方选择现有模板</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    
+    const canEditData = hasPermission('data:edit');
+
+    templateData.forEach((phase, phaseIndex) => {
+        const phaseExpanded = dataTreeExpandState.phase[phase.id] !== false;
+        html += `
+            <div class="tree-item">
+                <div class="tree-header phase" data-type="phase" data-id="${phase.id}" onclick="toggleDataTreeRow(this)">
+                    <div class="tree-toggle ${phaseExpanded ? 'expanded' : 'collapsed'}">${phaseExpanded ? '−' : '+'}</div>
+                    <span class="tree-title">${phase.name} (第${phase.startDayOffset || 1}天开始)</span>
+                    <div class="tree-actions" style="${canEditData ? '' : 'display:none;'}" onclick="event.stopPropagation()">
+                        <button class="btn-add" onclick="showAddSBOPModal(${phaseIndex})">添加SBOP</button>
+                        <button class="btn-edit" onclick="showEditPhaseModal(${phaseIndex})">编辑</button>
+                        <button class="btn-delete" onclick="deletePhase(${phaseIndex})">删除</button>
+                    </div>
+                </div>
+                <div class="tree-children" style="display:${phaseExpanded ? 'block' : 'none'};">
+        `;
+        
+        if (phase.sbops) {
+            phase.sbops.forEach((sbop, sbopIndex) => {
+                const carCounts = sbop.carCounts || {};
+                const totalWorkOrders = sbop.orders ? sbop.orders.length : 0;
+                const sbopExpanded = dataTreeExpandState.sbop[sbop.id] !== false;
+                
+                // 生成车号展示文本 (1-8号车)
+                const carInfo = [1, 2, 3, 4, 5, 6, 7, 8]
+                    .filter(num => carCounts[num] > 0)
+                    .map(num => `${num}#车:${carCounts[num]}`)
+                    .join(', ');
+
+                html += `
+                    <div class="tree-item">
+                        <div class="tree-header sbop" data-type="sbop" data-id="${sbop.id}" onclick="toggleDataTreeRow(this)">
+                            <div class="tree-toggle ${sbopExpanded ? 'expanded' : 'collapsed'}">${sbopExpanded ? '−' : '+'}</div>
+                            <span class="tree-title">${sbop.name} (阶段第${sbop.startDayOffset || 1}天开始)</span>
+                            <span class="tree-info">节拍: ${sbop.takt || 3} | 总工时: ${sbop.totalHours || 0}h | 人数: ${sbop.workerCount || 1} | 总工单: ${totalWorkOrders}${sbop.team ? ' | 班组: ' + sbop.team : ''}</span>
+                            <div class="car-info-badge">${carInfo || '无车工单'}</div>
+                            <div class="tree-actions" style="${canEditData ? '' : 'display:none;'}" onclick="event.stopPropagation()">
+                                <button class="btn-edit" onclick="moveSBOP(${phaseIndex}, ${sbopIndex}, -1)">上移</button>
+                                <button class="btn-edit" onclick="moveSBOP(${phaseIndex}, ${sbopIndex}, 1)">下移</button>
+                                <button class="btn-edit" onclick="showEditSBOPModal(${phaseIndex}, ${sbopIndex})">编辑SBOP</button>
+                                <button class="btn-delete" onclick="deleteSBOP(${phaseIndex}, ${sbopIndex})">删除</button>
+                            </div>
+                        </div>
+                        <div class="tree-children" style="display:${sbopExpanded ? 'block' : 'none'};">
+                `;
+                
+                if (sbop.orders) {
+                    sbop.orders.forEach((order, orderIndex) => {
+                        html += `
+                            <div class="tree-item">
+                                <div class="tree-header order">
+                                    <span class="tree-title">${order.name} (${order.duration || 0}小时/${order.workerCount || 1}人)</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+        }
+        
+        html += `
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+function toggleDataTreeRow(header) {
+    const toggle = header.querySelector('.tree-toggle');
+    const item = header.closest('.tree-item');
+    const children = item.querySelector('.tree-children');
+    const type = header.getAttribute('data-type');
+    const idStr = header.getAttribute('data-id');
+    const id = idStr ? idStr : null;
+    
+    if (children) {
+        if (children.style.display === 'none') {
+            children.style.display = 'block';
+            toggle.textContent = '−';
+            toggle.classList.remove('collapsed');
+            toggle.classList.add('expanded');
+            if (type === 'phase' && id) dataTreeExpandState.phase[id] = true;
+            if (type === 'sbop' && id) dataTreeExpandState.sbop[id] = true;
+        } else {
+            children.style.display = 'none';
+            toggle.textContent = '+';
+            toggle.classList.remove('expanded');
+            toggle.classList.add('collapsed');
+            if (type === 'phase' && id) dataTreeExpandState.phase[id] = false;
+            if (type === 'sbop' && id) dataTreeExpandState.sbop[id] = false;
+        }
+    }
+}
+
+function expandAllDataTree() {
+    document.querySelectorAll('.data-tree .tree-children').forEach(c => c.style.display = 'block');
+    document.querySelectorAll('.data-tree .tree-toggle').forEach(t => {
+        t.textContent = '−';
+        t.classList.remove('collapsed');
+        t.classList.add('expanded');
+    });
+    document.querySelectorAll('.data-tree .tree-header[data-type][data-id]').forEach(h => {
+        const type = h.getAttribute('data-type');
+        const id = h.getAttribute('data-id');
+        if (!id) return;
+        if (type === 'phase') dataTreeExpandState.phase[id] = true;
+        if (type === 'sbop') dataTreeExpandState.sbop[id] = true;
+    });
+}
+
+function collapseAllDataTree() {
+    document.querySelectorAll('.data-tree .tree-children').forEach(c => c.style.display = 'none');
+    document.querySelectorAll('.data-tree .tree-toggle').forEach(t => {
+        t.textContent = '+';
+        t.classList.remove('expanded');
+        t.classList.add('collapsed');
+    });
+    document.querySelectorAll('.data-tree .tree-header[data-type][data-id]').forEach(h => {
+        const type = h.getAttribute('data-type');
+        const id = h.getAttribute('data-id');
+        if (!id) return;
+        if (type === 'phase') dataTreeExpandState.phase[id] = false;
+        if (type === 'sbop') dataTreeExpandState.sbop[id] = false;
+    });
+}
+
+function showAddPhaseModal() {
+    document.getElementById('modalTitle').textContent = '添加检修阶段';
+    document.getElementById('modalBody').innerHTML = `
+        <div class="form-group">
+            <label>阶段名称:</label>
+            <input type="text" id="phaseName" placeholder="请输入阶段名称">
+        </div>
+        <div class="form-group">
+            <label>开始作业第几天 (1-99):</label>
+            <input type="number" id="phaseStartDay" value="1" min="1" max="99">
+        </div>
+        <button class="btn btn-primary" onclick="addPhase()">确认添加</button>
+    `;
+    openModal();
+}
+
+function showEditPhaseModal(phaseIndex) {
+    const phase = templateData[phaseIndex];
+    document.getElementById('modalTitle').textContent = '编辑检修阶段';
+    document.getElementById('modalBody').innerHTML = `
+        <div class="form-group">
+            <label>阶段名称:</label>
+            <input type="text" id="phaseName" value="${phase.name}">
+        </div>
+        <div class="form-group">
+            <label>开始作业第几天 (1-99):</label>
+            <input type="number" id="phaseStartDay" value="${phase.startDayOffset || 1}" min="1" max="99">
+        </div>
+        <button class="btn btn-primary" onclick="updatePhase(${phaseIndex})">确认修改</button>
+    `;
+    openModal();
+}
+
+function addPhase() {
+    const name = document.getElementById('phaseName').value.trim();
+    const startDay = parseInt(document.getElementById('phaseStartDay').value) || 1;
+    
+    if (!name) {
+        alert('请输入阶段名称！');
+        return;
+    }
+    
+    templateData.push({
+        id: Date.now(),
+        name: name,
+        startDayOffset: startDay,
+        sbops: []
+    });
+    
+    renderDataTree();
+    closeModal();
+}
+
+function updatePhase(phaseIndex) {
+    const name = document.getElementById('phaseName').value.trim();
+    const startDay = parseInt(document.getElementById('phaseStartDay').value) || 1;
+    
+    if (!name) {
+        alert('请输入阶段名称！');
+        return;
+    }
+    
+    templateData[phaseIndex].name = name;
+    templateData[phaseIndex].startDayOffset = startDay;
+    renderDataTree();
+    closeModal();
+}
+
+function showAddSBOPModal(phaseIndex) {
+    document.getElementById('modalTitle').textContent = '添加SBOP';
+    document.getElementById('modalBody').innerHTML = `
+        <div class="form-group">
+            <label>SBOP名称:</label>
+            <input type="text" id="sbopName" placeholder="请输入SBOP名称">
+        </div>
+        <div class="form-group">
+            <label>阶段开始第几天 (1-99):</label>
+            <input type="number" id="sbopStartDay" value="1" min="1" max="99">
+        </div>
+        <div class="form-group">
+            <label>工时总数 (小时):</label>
+            <input type="number" id="sbopTotalHours" value="8" min="0" step="0.5">
+        </div>
+        <div class="form-group">
+            <label>作业人数:</label>
+            <input type="number" id="sbopWorkerCount" value="1" min="1">
+        </div>
+        <div class="form-group">
+            <label>节拍设置 (1-9):</label>
+            <input type="number" id="sbopTakt" value="3" min="1" max="9">
+        </div>
+        <div class="form-group">
+            <label>各车工单数量:</label>
+            <div class="car-counts-grid">
+                ${[1, 2, 3, 4, 5, 6, 7, 8].map(num => `
+                    <div class="car-count-item">
+                        <label>${num}#车:</label>
+                        <input type="number" class="car-count-input" data-car="${num}" value="0" min="0">
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        <div class="form-group">
+            <label>班组:</label>
+            <select id="sbopTeam">
+                <option value="">-- 请选择班组 --</option>
+                ${teamDictionary.map(team => `<option value="${team}">${team}</option>`).join('')}
+            </select>
+        </div>
+        <button class="btn btn-primary" onclick="addSBOP(${phaseIndex})">确认添加</button>
+    `;
+    openModal();
+}
+
+function showEditSBOPModal(phaseIndex, sbopIndex) {
+    const sbop = templateData[phaseIndex].sbops[sbopIndex];
+    const carCounts = sbop.carCounts || {};
+    
+    document.getElementById('modalTitle').textContent = '编辑SBOP';
+    document.getElementById('modalBody').innerHTML = `
+        <div class="form-group">
+            <label>SBOP名称:</label>
+            <input type="text" id="sbopName" value="${sbop.name}">
+        </div>
+        <div class="form-group">
+            <label>阶段开始第几天 (1-99):</label>
+            <input type="number" id="sbopStartDay" value="${sbop.startDayOffset || 1}" min="1" max="99">
+        </div>
+        <div class="form-group">
+            <label>工时总数 (小时):</label>
+            <input type="number" id="sbopTotalHours" value="${sbop.totalHours || 8}" min="0" step="0.5">
+        </div>
+        <div class="form-group">
+            <label>作业人数:</label>
+            <input type="number" id="sbopWorkerCount" value="${sbop.workerCount || 1}" min="1">
+        </div>
+        <div class="form-group">
+            <label>节拍设置 (1-9):</label>
+            <input type="number" id="sbopTakt" value="${sbop.takt || 3}" min="1" max="9">
+        </div>
+        <div class="form-group">
+            <label>各车工单数量:</label>
+            <div class="car-counts-grid">
+                ${[1, 2, 3, 4, 5, 6, 7, 8].map(num => `
+                    <div class="car-count-item">
+                        <label>${num}#车:</label>
+                        <input type="number" class="car-count-input" data-car="${num}" value="${carCounts[num] || 0}" min="0">
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        <div class="form-group">
+            <label>班组:</label>
+            <select id="sbopTeam">
+                <option value="">-- 请选择班组 --</option>
+                ${teamDictionary.map(team => `<option value="${team}" ${sbop.team === team ? 'selected' : ''}>${team}</option>`).join('')}
+            </select>
+        </div>
+        <button class="btn btn-primary" onclick="updateSBOP(${phaseIndex}, ${sbopIndex})">确认修改</button>
+    `;
+    openModal();
+}
+
+function generateOrdersFromCarCounts(carCounts, totalHours, workerCount) {
+    const orders = [];
+    const carNums = Object.keys(carCounts).sort((a, b) => a - b);
+    
+    // 首先收集所有需要生成的工单车号
+    const carOrderSequence = [];
+    carNums.forEach(carNum => {
+        const count = carCounts[carNum];
+        for (let i = 0; i < count; i++) {
+            carOrderSequence.push(carNum);
+        }
+    });
+    
+    const totalOrders = carOrderSequence.length;
+    if (totalOrders === 0) return [];
+    
+    // 计算单个工单工时，保留一位小数
+    const avgDuration = parseFloat((totalHours / totalOrders).toFixed(1));
+    let remainingHours = totalHours;
+    
+    carOrderSequence.forEach((carNum, index) => {
+        let duration;
+        if (index === totalOrders - 1) {
+            // 最后一个工单处理余数
+            duration = parseFloat(remainingHours.toFixed(1));
+        } else {
+            duration = avgDuration;
+            remainingHours -= avgDuration;
+        }
+        
+        orders.push({
+            id: Date.now() + Math.random() + index,
+            name: `${carNum}#车工单`,
+            duration: duration,
+            workerCount: workerCount
+        });
+    });
+    
+    return orders;
+}
+
+function addSBOP(phaseIndex) {
+    const name = document.getElementById('sbopName').value.trim();
+    const startDay = parseInt(document.getElementById('sbopStartDay').value) || 1;
+    const totalHours = parseFloat(document.getElementById('sbopTotalHours').value) || 0;
+    const workerCount = parseInt(document.getElementById('sbopWorkerCount').value) || 1;
+    const takt = parseInt(document.getElementById('sbopTakt').value) || 3;
+    const team = document.getElementById('sbopTeam').value.trim();
+    
+    const carCounts = {};
+    document.querySelectorAll('.car-count-input').forEach(input => {
+        carCounts[input.dataset.car] = parseInt(input.value) || 0;
+    });
+    
+    if (!name) {
+        alert('请输入SBOP名称！');
+        return;
+    }
+    
+    if (!templateData[phaseIndex].sbops) {
+        templateData[phaseIndex].sbops = [];
+    }
+    
+    const orders = generateOrdersFromCarCounts(carCounts, totalHours, workerCount);
+    
+    templateData[phaseIndex].sbops.push({
+        id: Date.now(),
+        name: name,
+        startDayOffset: startDay,
+        totalHours: totalHours,
+        workerCount: workerCount,
+        takt: takt,
+        carCounts: carCounts,
+        team: team,
+        orders: orders
+    });
+    
+    renderDataTree();
+    closeModal();
+}
+
+function moveSBOP(phaseIndex, sbopIndex, delta) {
+    const phase = templateData[phaseIndex];
+    if (!phase || !Array.isArray(phase.sbops)) return;
+    const newIndex = sbopIndex + delta;
+    if (newIndex < 0 || newIndex >= phase.sbops.length) return;
+    const tmp = phase.sbops[sbopIndex];
+    phase.sbops[sbopIndex] = phase.sbops[newIndex];
+    phase.sbops[newIndex] = tmp;
+    renderDataTree();
+}
+
+function updateSBOP(phaseIndex, sbopIndex) {
+    const name = document.getElementById('sbopName').value.trim();
+    const startDay = parseInt(document.getElementById('sbopStartDay').value) || 1;
+    const totalHours = parseFloat(document.getElementById('sbopTotalHours').value) || 0;
+    const workerCount = parseInt(document.getElementById('sbopWorkerCount').value) || 1;
+    const takt = parseInt(document.getElementById('sbopTakt').value) || 3;
+    const team = document.getElementById('sbopTeam').value.trim();
+    
+    const carCounts = {};
+    document.querySelectorAll('.car-count-input').forEach(input => {
+        carCounts[input.dataset.car] = parseInt(input.value) || 0;
+    });
+    
+    if (!name) {
+        alert('请输入SBOP名称！');
+        return;
+    }
+    
+    const sbop = templateData[phaseIndex].sbops[sbopIndex];
+    const orders = generateOrdersFromCarCounts(carCounts, totalHours, workerCount);
+    
+    sbop.name = name;
+    sbop.startDayOffset = startDay;
+    sbop.totalHours = totalHours;
+    sbop.workerCount = workerCount;
+    sbop.takt = takt;
+    sbop.carCounts = carCounts;
+    sbop.team = team;
+    sbop.orders = orders;
+    
+    renderDataTree();
+    closeModal();
+}
+
+function showAddOrderModal(phaseIndex, sbopIndex) {
+    document.getElementById('modalTitle').textContent = '添加工单';
+    document.getElementById('modalBody').innerHTML = `
+        <div class="form-group">
+            <label>工单名称:</label>
+            <input type="text" id="orderName" placeholder="请输入工单名称">
+        </div>
+        <div class="form-group">
+            <label>工时 (小时):</label>
+            <input type="number" id="orderDuration" value="8" step="0.5" min="0">
+        </div>
+        <div class="form-group">
+            <label>人数:</label>
+            <input type="number" id="orderWorkerCount" value="1" min="1">
+        </div>
+        <button class="btn btn-primary" onclick="addOrder(${phaseIndex}, ${sbopIndex})">确认添加</button>
+    `;
+    openModal();
+}
+
+function showEditOrderModal(phaseIndex, sbopIndex, orderIndex) {
+    const order = templateData[phaseIndex].sbops[sbopIndex].orders[orderIndex];
+    document.getElementById('modalTitle').textContent = '编辑工单';
+    document.getElementById('modalBody').innerHTML = `
+        <div class="form-group">
+            <label>工单名称:</label>
+            <input type="text" id="orderName" value="${order.name}">
+        </div>
+        <div class="form-group">
+            <label>工时 (小时):</label>
+            <input type="number" id="orderDuration" value="${order.duration || 8}" step="0.5" min="0">
+        </div>
+        <div class="form-group">
+            <label>人数:</label>
+            <input type="number" id="orderWorkerCount" value="${order.workerCount || 1}" min="1">
+        </div>
+        <button class="btn btn-primary" onclick="updateOrder(${phaseIndex}, ${sbopIndex}, ${orderIndex})">确认修改</button>
+    `;
+    openModal();
+}
+
+function addOrder(phaseIndex, sbopIndex) {
+    const name = document.getElementById('orderName').value.trim();
+    const duration = parseFloat(document.getElementById('orderDuration').value) || 0;
+    const workerCount = parseInt(document.getElementById('orderWorkerCount').value) || 1;
+    
+    if (!name) {
+        alert('请输入工单名称！');
+        return;
+    }
+    
+    const sbop = templateData[phaseIndex].sbops[sbopIndex];
+    if (!sbop.orders) {
+        sbop.orders = [];
+    }
+    
+    sbop.orders.push({
+        id: Date.now(),
+        name: name,
+        duration: duration,
+        workerCount: workerCount
+    });
+    
+    renderDataTree();
+    closeModal();
+}
+
+function updateOrder(phaseIndex, sbopIndex, orderIndex) {
+    const name = document.getElementById('orderName').value.trim();
+    const duration = parseFloat(document.getElementById('orderDuration').value) || 0;
+    const workerCount = parseInt(document.getElementById('orderWorkerCount').value) || 1;
+    
+    if (!name) {
+        alert('请输入工单名称！');
+        return;
+    }
+    
+    const order = templateData[phaseIndex].sbops[sbopIndex].orders[orderIndex];
+    order.name = name;
+    order.duration = duration;
+    order.workerCount = workerCount;
+    
+    renderDataTree();
+    closeModal();
+}
+
+function deletePhase(phaseIndex) {
+    if (confirm('确定要删除该阶段吗？')) {
+        templateData.splice(phaseIndex, 1);
+        renderDataTree();
+    }
+}
+
+function deleteSBOP(phaseIndex, sbopIndex) {
+    if (confirm('确定要删除该SBOP吗？')) {
+        templateData[phaseIndex].sbops.splice(sbopIndex, 1);
+        renderDataTree();
+    }
+}
+
+function deleteOrder(phaseIndex, sbopIndex, orderIndex) {
+    if (confirm('确定要删除该工单吗？')) {
+        templateData[phaseIndex].sbops[sbopIndex].orders.splice(orderIndex, 1);
+        renderDataTree();
+    }
+}
+
+function clearData() {
+    if (!confirm('确定要清空当前编辑的模板数据吗？此操作不可恢复！')) {
+        return;
+    }
+    
+    templateData = [];
+    renderDataTree();
+    
+    if (ganttChart) {
+        ganttChart.destroy();
+        ganttChart = null;
+    }
+    
+    document.getElementById('ganttInfo').innerHTML = '';
+    document.getElementById('ganttTree').innerHTML = `
+        <div class="empty-state">
+            <h3>暂无排程数据</h3>
+            <p>请先生成排程</p>
+        </div>
+    `;
+}
+
+function openModal() {
+    document.getElementById('modal').style.display = 'block';
+}
+
+function closeModal() {
+    document.getElementById('modal').style.display = 'none';
+}

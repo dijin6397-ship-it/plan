@@ -27,7 +27,7 @@ DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "state.json"
 _state_lock = Lock()
 _auth_lock = Lock()
-POSTGRES_URL = os.environ.get("POSTGRES_URL")
+POSTGRES_URL = os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL")
 KV_REST_API_URL = os.environ.get("KV_REST_API_URL")
 
 KV_REST_API_TOKEN = os.environ.get("KV_REST_API_TOKEN")
@@ -35,7 +35,7 @@ KV_STATE_KEY = os.environ.get("STATE_KV_KEY", "plan_state")
 KV_USERS_KEY = os.environ.get("USERS_KV_KEY", "plan_users")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or "admin123"
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "0") == "1"
 USERS_FILE = DATA_DIR / "users.json"
 
@@ -418,19 +418,30 @@ def _init_auth_fallback():
             store[ADMIN_USERNAME] = cur
         _save_users_store(store)
 
-# Initialize DB on startup
-try:
-    _init_pg_db()
-except Exception as e:
-    print(f"Error initializing Postgres DB: {e}")
-try:
-    _init_auth_db()
-except Exception as e:
-    print(f"Error initializing auth DB: {e}")
-try:
-    _init_auth_fallback()
-except Exception as e:
-    print(f"Error initializing auth store: {e}")
+# 延迟初始化 - 避免Vercel冷启动超时
+_db_initialized = False
+_auth_initialized = False
+
+def _ensure_db_init():
+    """确保数据库已初始化（在第一个请求时执行）"""
+    global _db_initialized, _auth_initialized
+    if not _db_initialized:
+        try:
+            _init_pg_db()
+            _db_initialized = True
+        except Exception as e:
+            print(f"Error initializing Postgres DB: {e}")
+    if not _auth_initialized:
+        try:
+            _init_auth_db()
+            _init_auth_fallback()
+            _auth_initialized = True
+        except Exception as e:
+            print(f"Error initializing auth DB: {e}")
+
+@app.before_request
+def _before_request_init():
+    _ensure_db_init()
 
 
 def _load_state():

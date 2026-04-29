@@ -418,19 +418,31 @@ def _init_auth_fallback():
             store[ADMIN_USERNAME] = cur
         _save_users_store(store)
 
-# Initialize DB on startup
-try:
-    _init_pg_db()
-except Exception as e:
-    print(f"Error initializing Postgres DB: {e}")
-try:
-    _init_auth_db()
-except Exception as e:
-    print(f"Error initializing auth DB: {e}")
-try:
-    _init_auth_fallback()
-except Exception as e:
-    print(f"Error initializing auth store: {e}")
+# 延迟初始化标志
+_db_initialized = False
+_auth_initialized = False
+
+def _ensure_db_initialized():
+    """在第一个请求时初始化数据库"""
+    global _db_initialized, _auth_initialized
+    if not _db_initialized:
+        try:
+            _init_pg_db()
+            _db_initialized = True
+        except Exception as e:
+            print(f"Error initializing Postgres DB: {e}")
+    if not _auth_initialized:
+        try:
+            _init_auth_db()
+            _init_auth_fallback()
+            _auth_initialized = True
+        except Exception as e:
+            print(f"Error initializing auth DB: {e}")
+
+@app.before_request
+def initialize_on_first_request():
+    """确保每个请求前数据库已初始化"""
+    _ensure_db_initialized()
 
 
 def _load_state():

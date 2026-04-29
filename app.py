@@ -51,28 +51,7 @@ CORS(app)
 
 @app.get("/health")
 def health():
-    info = {
-        "ok": True,
-        "db_initialized": _db_initialized,
-        "auth_initialized": _auth_initialized,
-        "postgres_configured": bool(POSTGRES_URL),
-        "admin_username": ADMIN_USERNAME,
-        "admin_password_set": bool(ADMIN_PASSWORD),
-    }
-    # Try to check if admin user exists in DB
-    if _use_auth_pg():
-        try:
-            with _get_pg_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT username, role, active FROM app_users WHERE username = %s", (ADMIN_USERNAME,))
-                    row = cur.fetchone()
-                    info["admin_in_db"] = bool(row)
-                    if row:
-                        info["admin_role"] = row.get("role")
-                        info["admin_active"] = row.get("active")
-        except Exception as e:
-            info["db_error"] = str(e)
-    return jsonify(info)
+    return jsonify({"ok": True})
 
 
 @app.get("/")

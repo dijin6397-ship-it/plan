@@ -11,7 +11,7 @@ async function loadCaptcha() {
     if (box) box.innerHTML = '';
     captchaToken = null;
     try {
-        const res = await fetch('/api/captcha', { cache: 'no-store' });
+        const res = await fetch('/api/captcha', { cache: 'no-store', credentials: 'same-origin' });
         if (!res.ok) {
             setMsg('获取验证码失败，请刷新页面重试。');
             return;
@@ -43,6 +43,7 @@ async function doLogin() {
         const res = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
             body: JSON.stringify({ username, password, captchaToken, captchaAnswer })
         });
         if (res.status === 503) {
@@ -59,9 +60,14 @@ async function doLogin() {
             await loadCaptcha();
             return;
         }
-        // Login succeeded - verify session before redirecting
+        // Login succeeded - save user info and verify session
+        const loginData = await res.json();
+        console.log('[login] Login response:', JSON.stringify(loginData));
+        // Save to sessionStorage as backup for UI rendering
+        try { sessionStorage.setItem('loginUser', JSON.stringify(loginData)); } catch(e) {}
+        // Verify session before redirecting
         try {
-            const meRes = await fetch('/api/me', { cache: 'no-store' });
+            const meRes = await fetch('/api/me', { cache: 'no-store', credentials: 'same-origin' });
             if (meRes.ok) {
                 const meData = await meRes.json();
                 console.log('[login] Session verified, user:', meData.username, 'role:', meData.role);

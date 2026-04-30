@@ -59,15 +59,40 @@ function canWriteState() {
 
 async function ensureAuthenticated() {
     try {
-        const res = await fetch('/api/me', { cache: 'no-store' });
+        const res = await fetch('/api/me', { cache: 'no-store', credentials: 'same-origin' });
         console.log('[auth] /api/me status:', res.status);
         if (res.status === 401) {
+            // Check sessionStorage for login backup before redirecting
+            try {
+                const cached = sessionStorage.getItem('loginUser');
+                if (cached) {
+                    const cachedUser = JSON.parse(cached);
+                    console.log('[auth] Using cached login data:', JSON.stringify(cachedUser));
+                    currentUser = cachedUser;
+                    updateUserBar();
+                    applyPermissions();
+                    // Don't redirect - let the user use the app with cached data
+                    // The next API call that needs auth will handle session issues
+                    return true;
+                }
+            } catch(e) {}
             console.log('[auth] Not authenticated, redirecting to login');
             location.href = '/login.html';
             return false;
         }
         if (!res.ok) {
             console.log('[auth] /api/me error:', res.status);
+            // Try sessionStorage fallback
+            try {
+                const cached = sessionStorage.getItem('loginUser');
+                if (cached) {
+                    currentUser = JSON.parse(cached);
+                    console.log('[auth] Using cached login data as fallback');
+                    updateUserBar();
+                    applyPermissions();
+                    return true;
+                }
+            } catch(e) {}
             currentUser = null;
             updateUserBar();
             applyPermissions();
@@ -75,11 +100,24 @@ async function ensureAuthenticated() {
         }
         currentUser = await res.json();
         console.log('[auth] currentUser:', JSON.stringify(currentUser));
+        // Update sessionStorage cache
+        try { sessionStorage.setItem('loginUser', JSON.stringify(currentUser)); } catch(e) {}
         updateUserBar();
         applyPermissions();
         return true;
     } catch (e) {
         console.error('[auth] ensureAuthenticated error:', e);
+        // Try sessionStorage fallback
+        try {
+            const cached = sessionStorage.getItem('loginUser');
+            if (cached) {
+                currentUser = JSON.parse(cached);
+                console.log('[auth] Using cached login data after network error');
+                updateUserBar();
+                applyPermissions();
+                return true;
+            }
+        } catch(e2) {}
         currentUser = null;
         updateUserBar();
         applyPermissions();
@@ -271,7 +309,7 @@ async function pullStateFromServer(options = {}) {
     if (isEditingLocked() && options.force !== true) return;
     statePullInFlight = true;
     try {
-        const res = await fetch('/api/state', { cache: 'no-store' });
+        const res = await fetch('/api/state', { cache: 'no-store', credentials: 'same-origin' });
         if (res.status === 401) {
             location.href = '/login.html';
             return;
@@ -322,6 +360,7 @@ async function pushStateToServer() {
         const res = await fetch('/api/state', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
             body: JSON.stringify(payload)
         });
         if (res.status === 401) {
@@ -602,7 +641,7 @@ function setupEventListeners() {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async function() {
             try {
-                await fetch('/api/logout', { method: 'POST' });
+                await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
             } catch (e) {}
             location.href = '/login.html';
         });

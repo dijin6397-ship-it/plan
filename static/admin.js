@@ -11,7 +11,7 @@ function formatAdminError(err) {
 }
 
 async function ensureAdmin() {
-    const res = await fetch('/api/me', { cache: 'no-store' });
+    const res = await fetch('/api/me', { cache: 'no-store', credentials: 'same-origin' });
     if (res.status === 401) {
         location.href = '/login.html';
         return null;
@@ -96,7 +96,7 @@ function renderUsers(users) {
 }
 
 async function loadUsers() {
-    const res = await fetch('/api/users', { cache: 'no-store' });
+    const res = await fetch('/api/users', { cache: 'no-store', credentials: 'same-origin' });
     if (res.status === 401) {
         location.href = '/login.html';
         return;
@@ -139,6 +139,7 @@ async function createUser() {
     const res = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify(payload)
     });
     if (!res.ok) {
@@ -156,6 +157,7 @@ async function updateUser(username, payload) {
     const res = await fetch(`/api/users/${encodeURIComponent(username)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify(payload)
     });
     if (!res.ok) {
@@ -172,10 +174,11 @@ async function deleteUser(username) {
     let res = await fetch('/api/users/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ username })
     });
     if (res.status === 404 || res.status === 405) {
-        res = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+        res = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE', credentials: 'same-origin' });
     }
     if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -209,7 +212,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async function() {
             try {
-                await fetch('/api/logout', { method: 'POST' });
+                await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
             } catch (e) {}
             location.href = '/login.html';
         });

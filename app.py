@@ -887,12 +887,27 @@ def api_debug_users():
         return jsonify({"error": str(e)}), 500
 
 
+@app.get("/api/debug/env")
+def api_debug_env():
+    """Debug endpoint to check environment variables (safe version)"""
+    return jsonify({
+        "ADMIN_USERNAME": ADMIN_USERNAME,
+        "ADMIN_PASSWORD_SET": bool(ADMIN_PASSWORD),
+        "ADMIN_PASSWORD_LENGTH": len(ADMIN_PASSWORD) if ADMIN_PASSWORD else 0,
+        "POSTGRES_URL_SET": bool(POSTGRES_URL),
+        "SECRET_KEY_SET": bool(SECRET_KEY),
+    })
+
+
 @app.post("/api/debug/reset-admin")
 def api_debug_reset_admin():
     """Debug endpoint to reset admin password"""
     try:
-        if not ADMIN_PASSWORD:
-            return jsonify({"error": "ADMIN_PASSWORD not set in environment"}), 400
+        data = request.get_json(force=True) or {}
+        new_password = data.get("password") or ADMIN_PASSWORD
+
+        if not new_password:
+            return jsonify({"error": "No password provided. Set ADMIN_PASSWORD in environment or provide password in request body."}), 400
 
         now = datetime.utcnow().isoformat()
         admin_perms = ["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]
@@ -910,7 +925,7 @@ def api_debug_reset_admin():
                         """,
                         (
                             ADMIN_USERNAME,
-                            generate_password_hash(ADMIN_PASSWORD),
+                            generate_password_hash(new_password),
                             "admin",
                             json.dumps(admin_perms),
                             True,
@@ -919,13 +934,13 @@ def api_debug_reset_admin():
                         ),
                     )
                 conn.commit()
-            return jsonify({"message": f"Admin user '{ADMIN_USERNAME}' reset successfully"})
+            return jsonify({"message": f"Admin user '{ADMIN_USERNAME}' reset successfully", "password_length": len(new_password)})
         else:
             with _auth_lock:
                 store = _load_users_store()
                 store[ADMIN_USERNAME] = {
                     "username": ADMIN_USERNAME,
-                    "password_hash": generate_password_hash(ADMIN_PASSWORD),
+                    "password_hash": generate_password_hash(new_password),
                     "role": "admin",
                     "permissions": admin_perms,
                     "active": True,
@@ -933,7 +948,7 @@ def api_debug_reset_admin():
                     "updated_at": now,
                 }
                 _save_users_store(store)
-            return jsonify({"message": f"Admin user '{ADMIN_USERNAME}' reset successfully"})
+            return jsonify({"message": f"Admin user '{ADMIN_USERNAME}' reset successfully", "password_length": len(new_password)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

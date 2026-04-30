@@ -59,6 +59,18 @@ async function doLogin() {
             await loadCaptcha();
             return;
         }
+        // Login succeeded - verify session before redirecting
+        try {
+            const meRes = await fetch('/api/me', { cache: 'no-store' });
+            if (meRes.ok) {
+                const meData = await meRes.json();
+                console.log('[login] Session verified, user:', meData.username, 'role:', meData.role);
+            } else {
+                console.warn('[login] /api/me returned', meRes.status, '- session may not be saved');
+            }
+        } catch (e) {
+            console.warn('[login] Session verification failed:', e);
+        }
         location.href = '/';
     } catch (e) {
         setMsg('登录失败，请稍后重试。');

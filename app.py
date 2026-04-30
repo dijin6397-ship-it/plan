@@ -15,7 +15,7 @@ from threading import Lock
 import urllib.request
 import urllib.error
 
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, jsonify, request, send_from_directory, session, redirect
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -56,7 +56,16 @@ def health():
 
 @app.get("/")
 def index():
+    if not _current_user():
+        return redirect("/login.html")
     return send_from_directory(str(STATIC_DIR), "index.html")
+
+
+@app.get("/admin.html")
+def admin_page():
+    if not _current_user():
+        return redirect("/login.html")
+    return send_from_directory(str(STATIC_DIR), "admin.html")
 
 
 @app.get("/<path:filename>")

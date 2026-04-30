@@ -868,6 +868,76 @@ def api_me():
     return jsonify(result)
 
 
+@app.get("/api/debug/users")
+def api_debug_users():
+    """Debug endpoint to list all users in database"""
+    try:
+        if _use_auth_pg():
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT username, role, active, created_at FROM app_users ORDER BY username")
+                    rows = cur.fetchall() or []
+                    users = [{"username": r.get("username"), "role": r.get("role"), "active": r.get("active")} for r in rows]
+                    return jsonify({"users": users, "count": len(users)})
+        else:
+            store = _load_users_store()
+            users = [{"username": k, "role": v.get("role"), "active": v.get("active")} for k, v in store.items()]
+            return jsonify({"users": users, "count": len(users)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/debug/reset-admin")
+def api_debug_reset_admin():
+    """Debug endpoint to reset admin password"""
+    try:
+        if not ADMIN_PASSWORD:
+            return jsonify({"error": "ADMIN_PASSWORD not set in environment"}), 400
+
+        now = datetime.utcnow().isoformat()
+        admin_perms = ["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]
+
+        if _use_auth_pg():
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    # Delete existing admin user if any
+                    cur.execute("DELETE FROM app_users WHERE username = %s", (ADMIN_USERNAME,))
+                    # Create new admin user with current password
+                    cur.execute(
+                        """
+                        INSERT INTO app_users (username, password_hash, role, permissions, active, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            ADMIN_USERNAME,
+                            generate_password_hash(ADMIN_PASSWORD),
+                            "admin",
+                            json.dumps(admin_perms),
+                            True,
+                            now,
+                            now,
+                        ),
+                    )
+                conn.commit()
+            return jsonify({"message": f"Admin user '{ADMIN_USERNAME}' reset successfully"})
+        else:
+            with _auth_lock:
+                store = _load_users_store()
+                store[ADMIN_USERNAME] = {
+                    "username": ADMIN_USERNAME,
+                    "password_hash": generate_password_hash(ADMIN_PASSWORD),
+                    "role": "admin",
+                    "permissions": admin_perms,
+                    "active": True,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                _save_users_store(store)
+            return jsonify({"message": f"Admin user '{ADMIN_USERNAME}' reset successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.post("/api/login")
 def api_login():
     data = request.get_json(force=True) or {}

@@ -21,6 +21,7 @@
                 </div>
                 <div class="header-actions">
                     <span id="userInfo" class="user-info"></span>
+                    <button id="changePwdBtn" class="btn btn-sm" style="display:none;">修改密码</button>
                     <a id="adminLink" class="btn btn-sm btn-secondary" href="admin.html" style="display:none;">账号及权限</a>
                     <button id="logoutBtn" class="btn btn-sm" style="display:none;">退出登录</button>
                 </div>
@@ -181,6 +182,30 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260430b"></script>
+    <div id="changePwdModal" class="modal">
+        <div class="modal-content" style="max-width:400px;">
+            <span class="close-change-pwd">&times;</span>
+            <h3>修改密码</h3>
+            <div class="form-group">
+                <label for="oldPasswordInput">旧密码</label>
+                <input id="oldPasswordInput" type="password" autocomplete="current-password">
+            </div>
+            <div class="form-group">
+                <label for="newPasswordInput">新密码</label>
+                <input id="newPasswordInput" type="password" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+                <label for="confirmPasswordInput">确认新密码</label>
+                <input id="confirmPasswordInput" type="password" autocomplete="new-password">
+            </div>
+            <div style="display:flex;gap:8px;margin-top:16px;">
+                <button id="changePwdConfirmBtn" class="btn btn-primary">确认修改</button>
+                <button id="changePwdCancelBtn" class="btn btn-secondary">取消</button>
+            </div>
+            <div id="changePwdMsg" style="margin-top:10px;color:#dc3545;font-size:0.9rem;"></div>
+        </div>
+    </div>
+
+    <script src="app.js?v=20260430c"></script>
 </body>
 </html>

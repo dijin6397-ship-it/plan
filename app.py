@@ -996,6 +996,38 @@ def api_logout():
     return jsonify({"ok": True})
 
 
+@app.post("/api/change-password")
+@_require_login
+def api_change_password():
+    data = request.get_json(force=True) or {}
+    old_password = data.get("oldPassword") or ""
+    new_password = data.get("newPassword") or ""
+
+    if not old_password or not new_password:
+        return jsonify({"error": "旧密码和新密码都不能为空"}), 400
+    if len(new_password) < 4:
+        return jsonify({"error": "新密码长度不能少于4位"}), 400
+
+    username = _current_user()
+    user = _get_user(username)
+    if not user:
+        return jsonify({"error": "用户不存在"}), 404
+    if not check_password_hash(user.get("password_hash") or "", old_password):
+        return jsonify({"error": "旧密码不正确"}), 403
+
+    try:
+        _update_user(username, {"password": new_password})
+        return jsonify({"ok": True, "message": "密码修改成功"})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError:
+        return jsonify({"error": "auth_storage_not_configured"}), 503
+    except psycopg2.Error:
+        return jsonify({"error": "auth_db_error"}), 503
+    except Exception:
+        return jsonify({"error": "修改密码失败"}), 500
+
+
 @app.get("/api/users")
 @_require_admin
 def api_users_list():

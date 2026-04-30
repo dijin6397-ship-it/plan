@@ -130,6 +130,7 @@ function updateUserBar() {
     const actionsContainer = document.querySelector('.header-actions') || (el ? el.parentElement : null);
     let btn = document.getElementById('logoutBtn');
     let adminLink = document.getElementById('adminLink');
+    let changePwdBtn = document.getElementById('changePwdBtn');
     console.log('[userBar] currentUser:', currentUser ? JSON.stringify(currentUser) : 'null');
     console.log('[userBar] adminLink element:', adminLink ? 'found in DOM' : 'NOT in DOM');
     console.log('[userBar] actionsContainer:', actionsContainer ? 'found' : 'NOT found');
@@ -138,6 +139,27 @@ function updateUserBar() {
             el.textContent = `当前账号：${currentUser.username}`;
         } else {
             el.textContent = '';
+        }
+    }
+    if (!changePwdBtn && actionsContainer) {
+        changePwdBtn = document.createElement('button');
+        changePwdBtn.id = 'changePwdBtn';
+        changePwdBtn.className = 'btn btn-sm';
+        changePwdBtn.type = 'button';
+        changePwdBtn.textContent = '修改密码';
+        changePwdBtn.style.display = 'none';
+        if (adminLink && adminLink.parentElement === actionsContainer) {
+            actionsContainer.insertBefore(changePwdBtn, adminLink);
+        } else if (btn && btn.parentElement === actionsContainer) {
+            actionsContainer.insertBefore(changePwdBtn, btn);
+        } else {
+            actionsContainer.appendChild(changePwdBtn);
+        }
+    }
+    if (changePwdBtn) {
+        changePwdBtn.style.display = currentUser ? 'inline-flex' : 'none';
+        if (currentUser) {
+            changePwdBtn.onclick = showChangePasswordModal;
         }
     }
     if (!btn && actionsContainer) {
@@ -723,6 +745,74 @@ function setupEventListeners() {
             closeModal();
         }
     });
+
+    const changePwdClose = document.querySelector('.close-change-pwd');
+    if (changePwdClose) {
+        changePwdClose.addEventListener('click', closeChangePasswordModal);
+    }
+    document.getElementById('changePwdCancelBtn')?.addEventListener('click', closeChangePasswordModal);
+    window.addEventListener('click', function(e) {
+        if (e.target === document.getElementById('changePwdModal')) {
+            closeChangePasswordModal();
+        }
+    });
+    document.getElementById('changePwdConfirmBtn')?.addEventListener('click', changePassword);
+}
+
+function showChangePasswordModal() {
+    const modal = document.getElementById('changePwdModal');
+    if (!modal) return;
+    document.getElementById('oldPasswordInput').value = '';
+    document.getElementById('newPasswordInput').value = '';
+    document.getElementById('confirmPasswordInput').value = '';
+    document.getElementById('changePwdMsg').textContent = '';
+    modal.style.display = 'block';
+}
+
+function closeChangePasswordModal() {
+    document.getElementById('changePwdModal').style.display = 'none';
+}
+
+async function changePassword() {
+    const msgEl = document.getElementById('changePwdMsg');
+    const oldPwd = document.getElementById('oldPasswordInput').value;
+    const newPwd = document.getElementById('newPasswordInput').value;
+    const confirmPwd = document.getElementById('confirmPasswordInput').value;
+
+    if (!oldPwd || !newPwd || !confirmPwd) {
+        msgEl.textContent = '请填写完整信息';
+        return;
+    }
+    if (newPwd !== confirmPwd) {
+        msgEl.textContent = '两次输入的新密码不一致';
+        return;
+    }
+    if (newPwd.length < 4) {
+        msgEl.textContent = '新密码长度不能少于4位';
+        return;
+    }
+
+    msgEl.textContent = '';
+    try {
+        const res = await fetch('/api/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            msgEl.style.color = '#28a745';
+            msgEl.textContent = '密码修改成功！';
+            setTimeout(closeChangePasswordModal, 1500);
+        } else {
+            msgEl.style.color = '#dc3545';
+            msgEl.textContent = data.error || '修改密码失败';
+        }
+    } catch (e) {
+        msgEl.style.color = '#dc3545';
+        msgEl.textContent = '网络错误，请稍后重试';
+    }
 }
 
 function loadTemplates() {
@@ -1024,15 +1114,16 @@ function exportGanttToExcel() {
     // 第1列: 名称 | 第2~N+1列: 每日单元格
     const aoaData = [];
 
-    // 表头第1行: 周信息
+    // 表头第1行: 月份信息
     const headerRow1 = ['结构化数据'];
     const weekLabels = ['日','一','二','三','四','五','六'];
+    let prevMonth = -1;
     for (let d = 0; d < totalDays; d++) {
         const dt = new Date(minDate.getTime() + d * msPerDay);
-        if (dt.getDay() === 0 || d === 0) {
-            const wkStart = new Date(dt);
-            let wkEnd = new Date(dt); wkEnd.setDate(wkEnd.getDate() + 6);
-            headerRow1.push(`第${Math.ceil((d + (minDate.getDay() === 0 ? 1 : 7 - minDate.getDay()))/7)}周`);
+        const m = dt.getMonth();
+        if (m !== prevMonth) {
+            headerRow1.push(`${m + 1}月`);
+            prevMonth = m;
         } else {
             headerRow1.push('');
         }
@@ -1711,16 +1802,26 @@ function renderGanttTree(scheduleData) {
     // 时间轴刻度HTML（周/日/星期）
     let timeScaleHtml = '';
     const weekdayLetters = ['日', '一', '二', '三', '四', '五', '六'];
-    const totalWeeks = Math.ceil(totalDays / 7);
 
-    // 周行
+    // 月份行
     timeScaleHtml += '<div style="display:flex;width:100%;min-width:' + (totalDays * 40) + 'px;">';
-    for (let w = 0; w < totalWeeks; w++) {
-        const startI = w * 7;
-        const endI = Math.min(totalDays - 1, startI + 6);
-        const cw = (endI - startI + 1) * 40;
-        timeScaleHtml += '<div style="flex:0 0 ' + cw + 'px;height:20px;line-height:20px;font-size:12px;font-weight:700;text-align:center;color:#333;border-right:1px solid #e9ecef;background:white;">第' + (w+1) + '周</div>';
+    let currentMonth = -1;
+    let monthStartIdx = 0;
+    for (let i = 0; i < totalDays; i++) {
+        const dayDate = new Date(minDate);
+        dayDate.setDate(dayDate.getDate() + i);
+        const m = dayDate.getMonth();
+        if (m !== currentMonth) {
+            if (currentMonth !== -1) {
+                const cw = (i - monthStartIdx) * 40;
+                timeScaleHtml += '<div style="flex:0 0 ' + cw + 'px;height:20px;line-height:20px;font-size:12px;font-weight:700;text-align:center;color:#333;border-right:1px solid #e9ecef;background:white;">' + (currentMonth + 1) + '月</div>';
+            }
+            currentMonth = m;
+            monthStartIdx = i;
+        }
     }
+    const lastCw = (totalDays - monthStartIdx) * 40;
+    timeScaleHtml += '<div style="flex:0 0 ' + lastCw + 'px;height:20px;line-height:20px;font-size:12px;font-weight:700;text-align:center;color:#333;border-right:1px solid #e9ecef;background:white;">' + (currentMonth + 1) + '月</div>';
     timeScaleHtml += '</div>';
 
     // 日期行

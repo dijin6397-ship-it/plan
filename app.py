@@ -213,56 +213,70 @@ def _use_auth_pg():
 
 def _init_auth_db():
     if not _use_auth_pg():
+        print(f"[init_auth_db] Not using Postgres auth, skipping")
         return
-    with _get_pg_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS app_users (
-                    username VARCHAR(80) PRIMARY KEY,
-                    password_hash VARCHAR(255) NOT NULL,
-                    role VARCHAR(20) NOT NULL,
-                    permissions JSONB NOT NULL,
-                    active BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at VARCHAR(100) NOT NULL,
-                    updated_at VARCHAR(100) NOT NULL
-                )
-            """)
-            cur.execute("SELECT username FROM app_users WHERE username = %s", (ADMIN_USERNAME,))
-            exists = cur.fetchone()
-            now = datetime.utcnow().isoformat()
-            admin_perms = ["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]
-            if not exists:
-                if ADMIN_PASSWORD:
+    print(f"[init_auth_db] Initializing auth DB, ADMIN_USERNAME={ADMIN_USERNAME}, ADMIN_PASSWORD={'set' if ADMIN_PASSWORD else 'not set'}")
+    try:
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS app_users (
+                        username VARCHAR(80) PRIMARY KEY,
+                        password_hash VARCHAR(255) NOT NULL,
+                        role VARCHAR(20) NOT NULL,
+                        permissions JSONB NOT NULL,
+                        active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at VARCHAR(100) NOT NULL,
+                        updated_at VARCHAR(100) NOT NULL
+                    )
+                """)
+                cur.execute("SELECT username FROM app_users WHERE username = %s", (ADMIN_USERNAME,))
+                exists = cur.fetchone()
+                now = datetime.utcnow().isoformat()
+                admin_perms = ["state:write", "admin", "data:view", "data:edit", "schedule:edit", "plan:view", "plan:edit", "plan:export", "details:view", "details:export"]
+                print(f"[init_auth_db] Admin user exists: {exists is not None}")
+                if not exists:
+                    if ADMIN_PASSWORD:
+                        print(f"[init_auth_db] Creating admin user with password")
+                        cur.execute(
+                            """
+                            INSERT INTO app_users (username, password_hash, role, permissions, active, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                ADMIN_USERNAME,
+                                generate_password_hash(ADMIN_PASSWORD),
+                                "admin",
+                                json.dumps(admin_perms),
+                                True,
+                                now,
+                                now,
+                            ),
+                        )
+                        print(f"[init_auth_db] Admin user created")
+                    else:
+                        print(f"[init_auth_db] WARNING: ADMIN_PASSWORD not set, cannot create admin user")
+                else:
+                    print(f"[init_auth_db] Updating existing admin user")
                     cur.execute(
                         """
-                        INSERT INTO app_users (username, password_hash, role, permissions, active, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        UPDATE app_users
+                        SET role = %s, permissions = %s, active = %s, updated_at = %s
+                        WHERE username = %s
                         """,
-                        (
-                            ADMIN_USERNAME,
-                            generate_password_hash(ADMIN_PASSWORD),
-                            "admin",
-                            json.dumps(admin_perms),
-                            True,
-                            now,
-                            now,
-                        ),
+                        ("admin", json.dumps(admin_perms), True, now, ADMIN_USERNAME),
                     )
-            else:
-                cur.execute(
-                    """
-                    UPDATE app_users
-                    SET role = %s, permissions = %s, active = %s, updated_at = %s
-                    WHERE username = %s
-                    """,
-                    ("admin", json.dumps(admin_perms), True, now, ADMIN_USERNAME),
-                )
-                if ADMIN_PASSWORD:
-                    cur.execute(
-                        "UPDATE app_users SET password_hash = %s, updated_at = %s WHERE username = %s",
-                        (generate_password_hash(ADMIN_PASSWORD), now, ADMIN_USERNAME),
-                    )
-        conn.commit()
+                    if ADMIN_PASSWORD:
+                        cur.execute(
+                            "UPDATE app_users SET password_hash = %s, updated_at = %s WHERE username = %s",
+                            (generate_password_hash(ADMIN_PASSWORD), now, ADMIN_USERNAME),
+                        )
+                        print(f"[init_auth_db] Admin password updated")
+            conn.commit()
+            print(f"[init_auth_db] Auth DB initialization completed")
+    except Exception as e:
+        print(f"[init_auth_db] ERROR: {e}")
+        raise
 
 
 def _default_state():
@@ -582,23 +596,29 @@ def _get_user(username: str):
                 with conn.cursor() as cur:
                     cur.execute("SELECT * FROM app_users WHERE btrim(username) = %s", (u,))
                     row = cur.fetchone()
+                    print(f"[_get_user] Query for '{u}', found: {row is not None}")
                     if not row:
                         key = _normalize_username_key(u)
                         cur.execute("SELECT * FROM app_users")
                         rows = cur.fetchall() or []
+                        print(f"[_get_user] Total users in DB: {len(rows)}")
                         for r in rows:
+                            print(f"[_get_user] Checking user: '{r.get('username')}'")
                             if _normalize_username_key(r.get("username") or "") == key:
                                 row = r
                                 break
                         if not row:
+                            print(f"[_get_user] User '{u}' not found after fallback search")
                             return None
                     if isinstance(row.get("permissions"), str):
                         try:
                             row["permissions"] = json.loads(row["permissions"])
                         except Exception:
                             row["permissions"] = []
+                    print(f"[_get_user] Returning user: {row.get('username')}, role: {row.get('role')}")
                     return row
-        except Exception:
+        except Exception as e:
+            print(f"[_get_user] ERROR: {e}")
             return None
     try:
         store = _load_users_store()
@@ -835,11 +855,17 @@ def _delete_user(username: str):
 @app.get("/api/me")
 @_require_login
 def api_me():
-    user = _get_user(_current_user())
+    current = _current_user()
+    print(f"[api_me] Current user from session: '{current}'")
+    user = _get_user(current)
+    print(f"[api_me] User lookup result: {user is not None}")
     if not user or not user.get("active", True):
+        print(f"[api_me] User not found or inactive, clearing session")
         session.pop("user", None)
         return jsonify({"error": "unauthorized"}), 401
-    return jsonify(_json_user(user))
+    result = _json_user(user)
+    print(f"[api_me] Returning user: {result}")
+    return jsonify(result)
 
 
 @app.post("/api/login")
@@ -850,19 +876,32 @@ def api_login():
     captcha_token = data.get("captchaToken") or ""
     captcha_answer = data.get("captchaAnswer") or ""
 
+    print(f"[api_login] Login attempt for user: '{username}'")
+
     if not _verify_captcha(captcha_token, captcha_answer):
+        print(f"[api_login] Captcha verification failed")
         return jsonify({"error": "captcha"}), 400
 
-    if not _get_user(ADMIN_USERNAME) and not ADMIN_PASSWORD:
+    admin_user = _get_user(ADMIN_USERNAME)
+    print(f"[api_login] Admin user exists: {admin_user is not None}, ADMIN_PASSWORD set: {bool(ADMIN_PASSWORD)}")
+
+    if not admin_user and not ADMIN_PASSWORD:
+        print(f"[api_login] Admin not initialized")
         return jsonify({"error": "admin_not_initialized"}), 503
 
     user = _get_user(username)
+    print(f"[api_login] User lookup result: {user is not None}")
     if not user or not user.get("active", True):
+        print(f"[api_login] User not found or inactive")
         return jsonify({"error": "invalid_credentials"}), 401
-    if not check_password_hash(user.get("password_hash") or "", password):
+
+    password_valid = check_password_hash(user.get("password_hash") or "", password)
+    print(f"[api_login] Password valid: {password_valid}")
+    if not password_valid:
         return jsonify({"error": "invalid_credentials"}), 401
 
     session["user"] = username
+    print(f"[api_login] Login successful for '{username}'")
     return jsonify(_json_user(user))
 
 

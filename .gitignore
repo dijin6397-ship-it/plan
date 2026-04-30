@@ -9,3 +9,4 @@ node_modules/
 *.log
 data/*.json
 history.txt
+test_login_flow.py

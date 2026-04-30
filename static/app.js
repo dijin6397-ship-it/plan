@@ -60,21 +60,26 @@ function canWriteState() {
 async function ensureAuthenticated() {
     try {
         const res = await fetch('/api/me', { cache: 'no-store' });
+        console.log('[auth] /api/me status:', res.status);
         if (res.status === 401) {
+            console.log('[auth] Not authenticated, redirecting to login');
             location.href = '/login.html';
             return false;
         }
         if (!res.ok) {
+            console.log('[auth] /api/me error:', res.status);
             currentUser = null;
             updateUserBar();
             applyPermissions();
             return true;
         }
         currentUser = await res.json();
+        console.log('[auth] currentUser:', JSON.stringify(currentUser));
         updateUserBar();
         applyPermissions();
         return true;
     } catch (e) {
+        console.error('[auth] ensureAuthenticated error:', e);
         currentUser = null;
         updateUserBar();
         applyPermissions();
@@ -87,6 +92,9 @@ function updateUserBar() {
     const actionsContainer = document.querySelector('.header-actions') || (el ? el.parentElement : null);
     let btn = document.getElementById('logoutBtn');
     let adminLink = document.getElementById('adminLink');
+    console.log('[userBar] currentUser:', currentUser ? JSON.stringify(currentUser) : 'null');
+    console.log('[userBar] adminLink element:', adminLink ? 'found in DOM' : 'NOT in DOM');
+    console.log('[userBar] actionsContainer:', actionsContainer ? 'found' : 'NOT found');
     if (el) {
         if (currentUser && currentUser.username) {
             el.textContent = `当前账号：${currentUser.username}`;
@@ -122,7 +130,11 @@ function updateUserBar() {
     if (adminLink) {
         const perms = currentUser && Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
         const isAdmin = currentUser && (currentUser.username === 'admin' || currentUser.role === 'admin' || perms.includes('admin'));
+        console.log('[userBar] isAdmin:', isAdmin, '| username:', currentUser?.username, '| role:', currentUser?.role, '| perms:', perms);
+        console.log('[userBar] Setting adminLink display to:', isAdmin ? 'inline-flex' : 'none');
         adminLink.style.display = isAdmin ? 'inline-flex' : 'none';
+    } else {
+        console.log('[userBar] adminLink is null, cannot show/hide');
     }
 }
 

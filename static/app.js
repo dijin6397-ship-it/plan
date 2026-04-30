@@ -985,7 +985,7 @@ function exportGanttToExcel() {
         phase:   { bg: 'FF1976D2', fg: 'FFFFFF' },
         sbop:    { bg: 'FF7B1FA2', fg: 'FFFFFF' },
         order:   { bg: 'FF4CAF50', fg: 'FFFFFF' },
-        grid:    {FFF2F2F2'}
+        grid:    { bg: 'FFF2F2F2' }
     };
 
     scheduleData.trains.forEach((train, ti) => {
